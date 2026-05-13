@@ -4,6 +4,7 @@ import SwiftData
 
 /// The critical verification screen. Shows the parsed event card with edit capabilities,
 /// calendar picker, and confirm/add actions. Features stagger reveal animation.
+/// Designed with premium Things 3 / Linear-style polish.
 struct EventPreviewView: View {
     @Environment(EventCreationViewModel.self) private var viewModel
     @Environment(PermissionManager.self) private var permissionManager
@@ -16,86 +17,89 @@ struct EventPreviewView: View {
     @State private var isAddingToCalendar = false
     @State private var animateFields = false
 
-    private let staggerDelay: Double = 0.08
+    @FocusState private var focusedField: EventField?
+
+    private var surface: Color {
+        colorScheme == .dark ? Color.surfaceBaseDark : Color.surfaceBase
+    }
+
+    private var raisedSurface: Color {
+        colorScheme == .dark ? Color.surfaceRaisedDark : Color.surfaceRaised
+    }
 
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 24) {
+                VStack(spacing: EventSpacing.xxl) {
                     // Drag indicator
                     Capsule()
-                        .fill(Color.secondary.opacity(0.3))
+                        .fill(Color.textQuaternary)
                         .frame(width: 36, height: 5)
-                        .padding(.top, 8)
+                        .padding(.top, EventSpacing.sm)
 
                     // Event card with stagger animation
                     if let event = viewModel.parsedEvent {
                         EventCard(event: event, variant: .full) { field in
-                            withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                                showInlineEditor = field
+                            EventHaptics.tap()
+                            withAnimation(EventAnimation.default_) {
+                                if showInlineEditor == field {
+                                    showInlineEditor = nil
+                                } else {
+                                    showInlineEditor = field
+                                    focusedField = field
+                                }
                             }
                         }
-                        .opacity(animateFields ? 1 : 0)
-                        .offset(y: animateFields ? 0 : 20)
-                        .animation(
-                            .spring(response: 0.4, dampingFraction: 0.8)
-                            .delay(staggerDelay * 1),
-                            value: animateFields
-                        )
-                        .padding(.horizontal, 16)
+                        .staggerReveal(delay: 0, trigger: animateFields)
+                        .padding(.horizontal, EventSpacing.pageMargin)
 
                         // Inline editors
                         if let editingField = showInlineEditor {
                             inlineEditor(for: editingField, event: event)
-                                .padding(.horizontal, 16)
+                                .padding(.horizontal, EventSpacing.pageMargin)
                                 .transition(.move(edge: .bottom).combined(with: .opacity))
+                                .staggerReveal(delay: 4, trigger: animateFields)
                         }
 
                         // Calendar picker
                         calendarPicker
-                            .opacity(animateFields ? 1 : 0)
-                            .offset(y: animateFields ? 0 : 16)
-                            .animation(
-                                .spring(response: 0.4, dampingFraction: 0.8)
-                                .delay(staggerDelay * 6),
-                                value: animateFields
-                            )
-                            .padding(.horizontal, 16)
+                            .staggerReveal(delay: 5, trigger: animateFields)
+                            .padding(.horizontal, EventSpacing.pageMargin)
+
+                        // Action buttons
+                        actionButtons
+                            .staggerReveal(delay: 6, trigger: animateFields)
+                            .padding(.horizontal, EventSpacing.pageMargin)
+                            .padding(.bottom, EventSpacing.lg)
 
                         // Privacy line
                         PrivacyLine()
-                            .opacity(animateFields ? 1 : 0)
-                            .animation(.easeOut(duration: 0.3).delay(staggerDelay * 7), value: animateFields)
+                            .staggerReveal(delay: 7, trigger: animateFields)
                     }
 
                     // Error state
                     if let error = viewModel.errorMessage {
-                        HStack(spacing: 6) {
+                        HStack(spacing: EventSpacing.sm) {
                             Image(systemName: "exclamationmark.circle.fill")
-                                .foregroundColor(.red)
+                                .font(.system(size: 14))
+                                .foregroundStyle(Color.semanticError)
                             Text(error)
-                                .font(.caption)
-                                .foregroundColor(.red)
+                                .font(EventTypography.footnote)
+                                .foregroundStyle(Color.semanticError)
                         }
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 10)
-                        .background(Color.red.opacity(0.1))
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                        .padding(.horizontal, 16)
+                        .padding(.horizontal, EventSpacing.md)
+                        .padding(.vertical, EventSpacing.sm)
+                        .background(
+                            RoundedRectangle(cornerRadius: EventRadius.small)
+                                .fill(Color.semanticError.opacity(0.1))
+                        )
+                        .padding(.horizontal, EventSpacing.pageMargin)
+                        .staggerReveal(delay: 8, trigger: animateFields)
                     }
-
-                    // Action buttons
-                    actionButtons
-                        .padding(.horizontal, 16)
-                        .padding(.bottom, 24)
-                        .opacity(animateFields ? 1 : 0)
-                        .animation(.easeOut(duration: 0.3).delay(staggerDelay * 8), value: animateFields)
                 }
             }
             .scrollDismissesKeyboard(.interactively)
-            .background(
-                colorScheme == .dark ? Color(.systemGray6) : Color(.systemGroupedBackground)
-            )
+            .background(surface.ignoresSafeArea())
             .onAppear {
                 loadCalendars()
                 triggerStaggerAnimation()
@@ -107,29 +111,22 @@ struct EventPreviewView: View {
                 DragGesture()
                     .onEnded { gesture in
                         if gesture.translation.height > 100 {
+                            EventHaptics.tap()
                             dismiss()
                         }
                     }
             )
             .interactiveDismissDisabled()
             .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Edit") {
-                        viewModel.editEvent()
-                    }
-                    .font(.body.weight(.medium))
-                    .foregroundColor(Color.accentPrimary)
-                    .accessibilityLabel("Edit event details")
-                    .frame(minWidth: 44, minHeight: 44)
-                }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("Cancel") {
+                        EventHaptics.tap()
                         viewModel.reset()
                         dismiss()
                     }
-                    .font(.body)
-                    .foregroundColor(.secondary)
-                    .frame(minWidth: 44, minHeight: 44)
+                    .font(EventTypography.body)
+                    .foregroundStyle(Color.textSecondary)
+                    .frame(minWidth: EventSpacing.touchTarget, minHeight: EventSpacing.touchTarget)
                 }
             }
         }
@@ -138,65 +135,75 @@ struct EventPreviewView: View {
     // MARK: - Calendar Picker
 
     private var calendarPicker: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: EventSpacing.sm) {
             Text("Calendar")
-                .font(.subheadline.weight(.semibold))
-                .foregroundColor(.secondary)
+                .font(EventTypography.subheadSemibold)
+                .foregroundStyle(Color.textSecondary)
 
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 10) {
+                HStack(spacing: EventSpacing.sm) {
                     ForEach(calendars, id: \.calendarIdentifier) { calendar in
                         Button {
-                            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                            EventHaptics.selection()
+                            withAnimation(EventAnimation.quick) {
                                 selectedCalendar = calendar
                                 if var event = viewModel.parsedEvent {
                                     event.calendar = calendar
                                     viewModel.updateParsedEvent(event)
                                 }
                             }
-                            let impact = UIImpactFeedbackGenerator(style: .light)
-                            impact.impactOccurred()
                         } label: {
-                            HStack(spacing: 6) {
+                            HStack(spacing: EventSpacing.xs) {
                                 Circle()
                                     .fill(Color(cgColor: calendar.cgColor))
                                     .frame(width: 10, height: 10)
 
                                 Text(calendar.title)
-                                    .font(.subheadline.weight(.medium))
+                                    .font(EventTypography.subheadMedium)
+                                    .foregroundColor(
+                                        selectedCalendar?.calendarIdentifier == calendar.calendarIdentifier
+                                            ? Color(cgColor: calendar.cgColor)
+                                            : (colorScheme == .dark ? Color.textPrimaryDark : Color.textPrimary)
+                                    )
                                     .lineLimit(1)
                             }
-                            .padding(.horizontal, 14)
-                            .frame(height: 36)
+                            .padding(.horizontal, EventSpacing.md)
+                            .frame(height: EventSpacing.smallButtonHeight)
                             .background(
                                 Capsule()
-                                    .fill(selectedCalendar?.calendarIdentifier == calendar.calendarIdentifier
-                                        ? Color(cgColor: calendar.cgColor).opacity(0.15)
-                                        : Color.clear
+                                    .fill(
+                                        selectedCalendar?.calendarIdentifier == calendar.calendarIdentifier
+                                            ? Color(cgColor: calendar.cgColor).opacity(0.12)
+                                            : (colorScheme == .dark ? Color.surfaceSubtleDark : Color.surfaceSubtle)
                                     )
                             )
                             .overlay(
                                 Capsule()
                                     .stroke(
                                         selectedCalendar?.calendarIdentifier == calendar.calendarIdentifier
-                                            ? Color(cgColor: calendar.cgColor)
-                                            : Color.secondary.opacity(0.2),
-                                        lineWidth: selectedCalendar?.calendarIdentifier == calendar.calendarIdentifier ? 2 : 1
+                                            ? Color(cgColor: calendar.cgColor).opacity(0.5)
+                                            : (colorScheme == .dark ? Color.borderSubtleDark : Color.borderSubtle),
+                                        lineWidth: selectedCalendar?.calendarIdentifier == calendar.calendarIdentifier ? 1.5 : 1
                                     )
                             )
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel("Calendar: \(calendar.title)")
                         .accessibilityAddTraits(selectedCalendar?.calendarIdentifier == calendar.calendarIdentifier ? .isSelected : [])
-                        .frame(minWidth: 44, minHeight: 36)
+                        .frame(minWidth: 44, minHeight: EventSpacing.smallButtonHeight)
                     }
                 }
+                .padding(.vertical, EventSpacing.xs)
             }
         }
-        .padding(16)
+        .padding(EventSpacing.cardPadding)
         .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(colorScheme == .dark ? Color(.systemGray5) : .white)
+            RoundedRectangle(cornerRadius: EventSpacing.cardCornerRadius)
+                .fill(raisedSurface)
+        )
+        .shadow(
+            color: .black.opacity(colorScheme == .dark ? 0.20 : 0.04),
+            radius: 6, x: 0, y: 2
         )
     }
 
@@ -213,7 +220,6 @@ struct EventPreviewView: View {
                     set: { newValue in
                         var updated = event
                         updated.title = newValue
-                        // Remove from uncertain if it was there
                         updated.uncertainFields.remove(.title)
                         viewModel.updateParsedEvent(updated)
                     }
@@ -221,10 +227,10 @@ struct EventPreviewView: View {
             )
 
         case .date:
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: EventSpacing.sm) {
                 Text("Edit Date")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundColor(.secondary)
+                    .font(EventTypography.subheadSemibold)
+                    .foregroundStyle(Color.textSecondary)
 
                 DatePicker(
                     "Date",
@@ -248,19 +254,23 @@ struct EventPreviewView: View {
                     displayedComponents: .date
                 )
                 .datePickerStyle(.graphical)
-                        .tint(Color.accentPrimary)
+                .tint(Color.brandPrimary)
             }
-            .padding(16)
+            .padding(EventSpacing.cardPadding)
             .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(colorScheme == .dark ? Color(.systemGray5) : .white)
+                RoundedRectangle(cornerRadius: EventSpacing.cardCornerRadius)
+                    .fill(raisedSurface)
+            )
+            .shadow(
+                color: .black.opacity(colorScheme == .dark ? 0.20 : 0.04),
+                radius: 6, x: 0, y: 2
             )
 
         case .time:
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: EventSpacing.sm) {
                 Text("Edit Time")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundColor(.secondary)
+                    .font(EventTypography.subheadSemibold)
+                    .foregroundStyle(Color.textSecondary)
 
                 DatePicker(
                     "Start",
@@ -275,7 +285,7 @@ struct EventPreviewView: View {
                     ),
                     displayedComponents: .hourAndMinute
                 )
-                .tint(Color.accentPrimary)
+                .tint(Color.brandPrimary)
 
                 if let end = event.endDate {
                     DatePicker(
@@ -291,13 +301,17 @@ struct EventPreviewView: View {
                         ),
                         displayedComponents: .hourAndMinute
                     )
-                .tint(Color.accentPrimary)
+                    .tint(Color.brandPrimary)
                 }
             }
-            .padding(16)
+            .padding(EventSpacing.cardPadding)
             .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(colorScheme == .dark ? Color(.systemGray5) : .white)
+                RoundedRectangle(cornerRadius: EventSpacing.cardCornerRadius)
+                    .fill(raisedSurface)
+            )
+            .shadow(
+                color: .black.opacity(colorScheme == .dark ? 0.20 : 0.04),
+                radius: 6, x: 0, y: 2
             )
 
         case .location:
@@ -332,56 +346,46 @@ struct EventPreviewView: View {
     }
 
     private func inlineTextEditor(title: String, text: Binding<String>, isMultiline: Bool = false) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: EventSpacing.sm) {
             Text(title)
-                .font(.subheadline.weight(.semibold))
-                .foregroundColor(.secondary)
+                .font(EventTypography.subheadSemibold)
+                .foregroundStyle(Color.textSecondary)
 
-                if isMultiline {
-                    TextEditor(text: text)
-                        .font(.body)
-                        .frame(minHeight: 80)
-                        .scrollContentBackground(.hidden)
-                        .padding(8)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(colorScheme == .dark ? Color(.systemGray6) : Color(.systemGray6))
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 8)
-                                .stroke(Color.accentPrimary.opacity(0.5), lineWidth: 1)
-                        )
+            if isMultiline {
+                TextEditor(text: text)
+                    .font(EventTypography.body)
+                    .frame(minHeight: 80)
+                    .scrollContentBackground(.hidden)
+                    .focused($focusedField, equals: .notes)
+                    .eventInput(isFocused: focusedField == .notes)
             } else {
                 TextField("Enter \(title.lowercased())", text: text)
-                    .font(.body)
+                    .font(EventTypography.body)
                     .textFieldStyle(.plain)
-                    .padding(12)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(colorScheme == .dark ? Color(.systemGray6) : Color(.systemGray6))
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                            .stroke(Color.accentPrimary.opacity(0.5), lineWidth: 1)
-                    )
+                    .focused($focusedField, equals: title == "Edit Title" ? .title : .location)
+                    .eventInput(isFocused: focusedField == .title || focusedField == .location)
             }
         }
-        .padding(16)
+        .padding(EventSpacing.cardPadding)
         .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(colorScheme == .dark ? Color(.systemGray5) : .white)
+            RoundedRectangle(cornerRadius: EventSpacing.cardCornerRadius)
+                .fill(raisedSurface)
+        )
+        .shadow(
+            color: .black.opacity(colorScheme == .dark ? 0.20 : 0.04),
+            radius: 6, x: 0, y: 2
         )
     }
 
     // MARK: - Action Buttons
 
     private var actionButtons: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: EventSpacing.md) {
             // Add to Calendar - primary
             Button {
                 addToCalendar()
             } label: {
-                HStack(spacing: 8) {
+                HStack(spacing: EventSpacing.sm) {
                     if isAddingToCalendar {
                         ProgressView()
                             .progressViewStyle(.circular)
@@ -389,85 +393,50 @@ struct EventPreviewView: View {
                             .tint(.white)
                     } else {
                         Image(systemName: "calendar.badge.plus")
+                            .font(.system(size: 16, weight: .medium))
                     }
                     Text("Add to Calendar")
-                        .font(.body.weight(.semibold))
+                        .font(EventTypography.bodyMedium)
                 }
-                .frame(maxWidth: .infinity)
-                .frame(height: 52)
-                .foregroundColor(.white)
-                .background(
-                    RoundedRectangle(cornerRadius: 14)
-                        .fill(isAddingToCalendar ? Color.gray : Color.accentPrimary)
-                )
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PrimaryButtonStyle(isDisabled: isAddingToCalendar))
             .disabled(isAddingToCalendar)
             .accessibilityLabel("Add event to calendar")
-            .frame(minWidth: 44, minHeight: 44)
-
-            // Edit
-            Button {
-                viewModel.editEvent()
-            } label: {
-                Text("Edit Details")
-                    .font(.body.weight(.medium))
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 48)
-                    .foregroundColor(Color.accentPrimary)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .stroke(Color.accentPrimary, lineWidth: 1.5)
-                    )
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Edit event details")
-            .frame(minWidth: 44, minHeight: 44)
+            .frame(minWidth: EventSpacing.touchTarget, minHeight: EventSpacing.touchTarget)
         }
     }
 
     // MARK: - Actions
 
     private func loadCalendars() {
-        // Load from environment or CalendarService
-        if let event = viewModel.parsedEvent, let cal = event.calendar {
+        if let cal = viewModel.parsedEvent?.calendar {
             selectedCalendar = cal
         }
-        // In production, load from EKEventStore
-        // calendars = calendarService.getCalendars()
-        // For now, a placeholder will be replaced by real CalendarService
     }
 
     private func addToCalendar() {
         isAddingToCalendar = true
-        let impact = UIImpactFeedbackGenerator(style: .medium)
-        impact.impactOccurred()
+        EventHaptics.press()
 
         Task {
-            // Ensure calendar permission
             let granted = await permissionManager.requestCalendarAccess()
             guard granted else {
-                await MainActor.run {
-                    isAddingToCalendar = false
-                    viewModel.errorMessage = "Calendar access is required to add events."
-                }
+                isAddingToCalendar = false
+                viewModel.errorMessage = "Calendar access is required to add events."
                 return
             }
 
             await viewModel.confirmEvent()
-            await MainActor.run {
-                isAddingToCalendar = false
-                if case .completed = viewModel.state {
-                    let haptic = UINotificationFeedbackGenerator()
-                    haptic.notificationOccurred(.success)
-                }
+            isAddingToCalendar = false
+            if case .completed = viewModel.state {
+                EventHaptics.success()
             }
         }
     }
 
     private func triggerStaggerAnimation() {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-            withAnimation(.easeOut(duration: 0.3)) {
+            withAnimation(EventAnimation.default_) {
                 animateFields = true
             }
         }
@@ -498,7 +467,12 @@ struct EventPreviewView_Previews: PreviewProvider {
             speechService: SpeechService(),
             modelContext: container.mainContext
         )
-        // Would set vm.state = .preview(event)
+        // Configure ViewModel for preview — assignments must be wrapped
+        // to avoid Swift interpreting them as View expressions in @ViewBuilder
+        let _ = {
+            vm.parsedEvent = event
+            vm.state = .preview(event)
+        }()
 
         EventPreviewView()
             .environment(vm)

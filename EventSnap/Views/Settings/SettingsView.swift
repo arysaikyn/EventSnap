@@ -4,6 +4,7 @@ import Speech
 import EventKit
 
 /// Standard grouped Form with sections for defaults, privacy, appearance, and about.
+/// Polished with brandPrimary tint, semantic status colors, and design system tokens.
 struct SettingsView: View {
     @Environment(SettingsViewModel.self) private var viewModel
     @Environment(PermissionManager.self) private var permissionManager
@@ -18,12 +19,17 @@ struct SettingsView: View {
         return f
     }()
 
+    private var surface: AdaptiveSurface {
+        AdaptiveSurface(scheme: colorScheme)
+    }
+
     var body: some View {
-        Form {
+        let selectedCalendar = viewModel.defaultCalendar ?? viewModel.availableCalendars.first
+
+        return Form {
             // MARK: - Defaults Section
             Section {
                 // Default Calendar
-                let selectedCalendar = viewModel.defaultCalendar ?? viewModel.availableCalendars.first
                 Picker("Default Calendar", selection: Binding<EKCalendar?>(
                     get: { selectedCalendar },
                     set: { newValue in
@@ -33,16 +39,17 @@ struct SettingsView: View {
                     }
                 )) {
                     ForEach(viewModel.availableCalendars, id: \.calendarIdentifier) { calendar in
-                        HStack {
+                        HStack(spacing: EventSpacing.sm) {
                             Circle()
                                 .fill(Color(cgColor: calendar.cgColor))
                                 .frame(width: 10, height: 10)
                             Text(calendar.title)
+                                .font(EventTypography.body)
                         }
                         .tag(calendar as EKCalendar?)
                     }
                 }
-                .frame(minHeight: 44)
+                .frame(minHeight: EventSpacing.touchTarget)
 
                 // Default Duration
                 Picker("Default Duration", selection: Binding(
@@ -50,10 +57,12 @@ struct SettingsView: View {
                     set: { viewModel.updateDefaultDuration($0) }
                 )) {
                     ForEach(durationOptions, id: \.interval) { option in
-                        Text(option.label).tag(option.interval)
+                        Text(option.label)
+                            .font(EventTypography.body)
+                            .tag(option.interval)
                     }
                 }
-                .frame(minHeight: 44)
+                .frame(minHeight: EventSpacing.touchTarget)
 
                 // Default Alert
                 Picker("Default Alert", selection: Binding(
@@ -61,32 +70,36 @@ struct SettingsView: View {
                     set: { viewModel.updateDefaultAlertOffset($0) }
                 )) {
                     ForEach(alertOptions, id: \.offset) { option in
-                        Text(option.label).tag(option.offset)
+                        Text(option.label)
+                            .font(EventTypography.body)
+                            .tag(option.offset)
                     }
                 }
-                .frame(minHeight: 44)
+                .frame(minHeight: EventSpacing.touchTarget)
             } header: {
                 Label("Defaults", systemImage: "gearshape.2")
+                    .font(EventTypography.subheadSemibold)
             }
 
             // MARK: - Privacy Section
             Section {
                 // On-device processing info
-                HStack(spacing: 12) {
+                HStack(spacing: EventSpacing.md) {
                     Image(systemName: "lock.shield.fill")
                         .font(.title2)
-.foregroundColor(Color.privacyGreen)
+                        .foregroundColor(Color.semanticSuccess)
                         .frame(width: 28)
 
                     VStack(alignment: .leading, spacing: 2) {
                         Text("On-Device Processing")
-                            .font(.body.weight(.medium))
+                            .font(EventTypography.bodyMedium)
+                            .foregroundColor(surface.textPrimary)
                         Text("All event data is processed locally. Nothing is sent to servers.")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+                            .font(EventTypography.footnote)
+                            .foregroundColor(surface.textTertiary)
                     }
                 }
-                .frame(minHeight: 44)
+                .frame(minHeight: EventSpacing.touchTarget)
 
                 // Camera permission
                 permissionRow(
@@ -125,6 +138,7 @@ struct SettingsView: View {
                 )
             } header: {
                 Label("Privacy", systemImage: "hand.raised.fill")
+                    .font(EventTypography.subheadSemibold)
             }
 
             // MARK: - Appearance Section
@@ -132,36 +146,37 @@ struct SettingsView: View {
                 Button {
                     showIconPicker = true
                 } label: {
-                    HStack(spacing: 12) {
+                    HStack(spacing: EventSpacing.md) {
                         Image(systemName: "app.gift")
                             .font(.title2)
-                            .foregroundColor(.secondary)
+                            .foregroundColor(Color.brandPrimary)
                             .frame(width: 32, height: 32)
                             .background(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .fill(Color.secondary.opacity(0.1))
+                                RoundedRectangle(cornerRadius: EventRadius.small)
+                                    .fill(Color.brandPrimary.opacity(0.1))
                             )
 
                         VStack(alignment: .leading, spacing: 2) {
                             Text("App Icon")
-                                .font(.body.weight(.medium))
-                                .foregroundColor(.primary)
+                                .font(EventTypography.bodyMedium)
+                                .foregroundColor(surface.textPrimary)
                             Text(viewModel.selectedAppIcon ?? "Default")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
+                                .font(EventTypography.footnote)
+                                .foregroundColor(surface.textTertiary)
                         }
 
                         Spacer()
 
                         Image(systemName: "chevron.right")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+                            .font(EventTypography.caption)
+                            .foregroundColor(surface.textTertiary)
                     }
                 }
                 .buttonStyle(.plain)
-                .frame(minHeight: 44)
+                .frame(minHeight: EventSpacing.touchTarget)
             } header: {
                 Label("Appearance", systemImage: "paintbrush")
+                    .font(EventTypography.subheadSemibold)
             }
             .sheet(isPresented: $showIconPicker) {
                 appIconPicker
@@ -171,24 +186,30 @@ struct SettingsView: View {
             Section {
                 HStack {
                     Text("Version")
+                        .font(EventTypography.body)
+                        .foregroundColor(surface.textPrimary)
                     Spacer()
                     Text("1.0.0")
-                        .foregroundColor(.secondary)
+                        .font(EventTypography.body)
+                        .foregroundColor(surface.textTertiary)
                 }
-                .frame(minHeight: 44)
+                .frame(minHeight: EventSpacing.touchTarget)
 
                 NavigationLink {
                     acknowledgementsView
                 } label: {
                     Text("Acknowledgements")
-                        .frame(minHeight: 44)
+                        .font(EventTypography.body)
+                        .foregroundColor(surface.textPrimary)
+                        .frame(minHeight: EventSpacing.touchTarget)
                 }
             } header: {
                 Label("About", systemImage: "info.circle")
+                    .font(EventTypography.subheadSemibold)
             }
         }
         .formStyle(.grouped)
-        .tint(Color.accentPrimary)
+        .tint(Color.brandPrimary)
         .onAppear {
             viewModel.refreshPermissionStatuses()
             viewModel.loadCalendars()
@@ -210,7 +231,7 @@ struct SettingsView: View {
         statusColor: Color,
         needsSettings: Bool
     ) -> some View {
-        HStack(spacing: 12) {
+        HStack(spacing: EventSpacing.md) {
             Image(systemName: icon)
                 .font(.title3)
                 .foregroundColor(statusColor)
@@ -218,10 +239,11 @@ struct SettingsView: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                    .font(.body.weight(.medium))
+                    .font(EventTypography.bodyMedium)
+                    .foregroundColor(surface.textPrimary)
 
                 Text(status)
-                    .font(.caption)
+                    .font(EventTypography.footnote)
                     .foregroundColor(statusColor)
             }
 
@@ -233,16 +255,16 @@ struct SettingsView: View {
                         UIApplication.shared.open(url)
                     }
                 }
-                .font(.caption.weight(.semibold))
-                .foregroundColor(Color.accentPrimary)
-                .frame(minWidth: 44, minHeight: 44)
+                .font(EventTypography.footnoteSemibold)
+                .foregroundColor(Color.brandPrimary)
+                .frame(minWidth: 44, minHeight: EventSpacing.touchTarget)
             } else {
                 Image(systemName: "checkmark.circle.fill")
                     .font(.body)
-                    .foregroundColor(Color.privacyGreen)
+                    .foregroundColor(Color.semanticSuccess)
             }
         }
-        .frame(minHeight: 44)
+        .frame(minHeight: EventSpacing.touchTarget)
     }
 
     // MARK: - App Icon Picker
@@ -256,49 +278,47 @@ struct SettingsView: View {
                         GridItem(.flexible()),
                         GridItem(.flexible())
                     ],
-                    spacing: 20
+                    spacing: EventSpacing.xl
                 ) {
                     ForEach(appIconOptions, id: \.name) { icon in
                         Button {
                             viewModel.selectedAppIcon = icon.name
                             showIconPicker = false
                         } label: {
-                            VStack(spacing: 8) {
+                            VStack(spacing: EventSpacing.sm) {
                                 Image(systemName: icon.systemImage)
                                     .font(.system(size: 36))
                                     .foregroundColor(iconColor(for: icon.name))
                                     .frame(width: 72, height: 72)
                                     .background(
-                                        RoundedRectangle(cornerRadius: 16)
+                                        RoundedRectangle(cornerRadius: EventRadius.large)
                                             .fill(iconBackground(for: icon.name))
                                     )
                                     .overlay(
-                                        RoundedRectangle(cornerRadius: 16)
+                                        RoundedRectangle(cornerRadius: EventRadius.large)
                                             .stroke(
                                                 viewModel.selectedAppIcon == icon.name
-                                                    ? Color.accentPrimary
-                                                    : Color.secondary.opacity(0.2),
+                                                    ? Color.brandPrimary
+                                                    : surface.border,
                                                 lineWidth: viewModel.selectedAppIcon == icon.name ? 3 : 1
                                             )
                                     )
 
                                 Text(icon.displayName)
-                                    .font(.caption)
-                                    .foregroundColor(.primary)
+                                    .font(EventTypography.caption)
+                                    .foregroundColor(surface.textPrimary)
                                     .lineLimit(1)
                             }
                         }
                         .buttonStyle(.plain)
-                        .frame(minWidth: 44, minHeight: 44)
+                        .frame(minWidth: 44, minHeight: EventSpacing.touchTarget)
                         .accessibilityLabel("\(icon.displayName) icon")
                         .accessibilityAddTraits(viewModel.selectedAppIcon == icon.name ? .isSelected : [])
                     }
                 }
-                .padding(24)
+                .padding(EventSpacing.xxl)
             }
-            .background(
-                colorScheme == .dark ? Color(.systemGray6) : Color(.systemGroupedBackground)
-            )
+            .background(surface.background)
             .navigationTitle("App Icon")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -306,9 +326,9 @@ struct SettingsView: View {
                     Button("Done") {
                         showIconPicker = false
                     }
-                    .font(.body.weight(.semibold))
-                    .foregroundColor(Color.accentPrimary)
-                    .frame(minWidth: 44, minHeight: 44)
+                    .font(EventTypography.bodyMedium)
+                    .foregroundColor(Color.brandPrimary)
+                    .frame(minWidth: 44, minHeight: EventSpacing.touchTarget)
                 }
             }
         }
@@ -319,14 +339,15 @@ struct SettingsView: View {
     private var acknowledgementsView: some View {
         List {
             ForEach(acknowledgements, id: \.name) { ack in
-                HStack {
+                HStack(spacing: EventSpacing.md) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(ack.name)
-                            .font(.body.weight(.medium))
+                            .font(EventTypography.bodyMedium)
+                            .foregroundColor(surface.textPrimary)
                         if let license = ack.license {
                             Text(license)
-                                .font(.caption)
-                                .foregroundColor(.secondary)
+                                .font(EventTypography.footnote)
+                                .foregroundColor(surface.textTertiary)
                                 .lineLimit(2)
                         }
                     }
@@ -336,12 +357,12 @@ struct SettingsView: View {
                     if let url = ack.url {
                         Link(destination: url) {
                             Image(systemName: "arrow.up.right.square")
-                                .foregroundColor(Color.accentTeal)
+                                .foregroundColor(Color.brandSecondary)
                         }
-                        .frame(minWidth: 44, minHeight: 44)
+                        .frame(minWidth: 44, minHeight: EventSpacing.touchTarget)
                     }
                 }
-                .frame(minHeight: 44)
+                .frame(minHeight: EventSpacing.touchTarget)
             }
         }
         .listStyle(.insetGrouped)
@@ -352,27 +373,42 @@ struct SettingsView: View {
     // MARK: - Permission Color Helpers
 
     private func permissionStatusColor(for status: AVAuthorizationStatus) -> Color {
-        status == .authorized ? Color.privacyGreen : (status == .notDetermined ? .secondary : Color.accentPrimary)
+        switch status {
+        case .authorized: return Color.semanticSuccess
+        case .denied, .restricted: return Color.semanticError
+        case .notDetermined: return surface.textTertiary
+        @unknown default: return surface.textTertiary
+        }
     }
 
     private func permissionStatusColor(for status: SFSpeechRecognizerAuthorizationStatus) -> Color {
-        status == .authorized ? Color.privacyGreen : (status == .notDetermined ? .secondary : Color.accentPrimary)
+        switch status {
+        case .authorized: return Color.semanticSuccess
+        case .denied, .restricted: return Color.semanticError
+        case .notDetermined: return surface.textTertiary
+        @unknown default: return surface.textTertiary
+        }
     }
 
     private func permissionStatusColor(for status: EKAuthorizationStatus) -> Color {
-        (status == .authorized || status == .writeOnly || status == .fullAccess) ? Color.privacyGreen : (status == .notDetermined ? .secondary : Color.accentPrimary)
+        switch status {
+        case .writeOnly, .fullAccess: return Color.semanticSuccess
+        case .denied, .restricted: return Color.semanticError
+        case .notDetermined: return surface.textTertiary
+        @unknown default: return surface.textTertiary
+        }
     }
 
     // MARK: - Icon Helpers
 
     private func iconColor(for name: String?) -> Color {
         switch name {
-        case "AppIconClassic": return Color.accentPrimary
+        case "AppIconClassic": return Color.brandPrimary
         case "AppIconDark": return .primary
-        case "AppIconLight": return Color.accentTeal
+        case "AppIconLight": return Color.brandSecondary
         case "AppIconPride": return .pink
-        case "AppIconMono": return .secondary
-        default: return Color.accentPrimary
+        case "AppIconMono": return surface.textTertiary
+        default: return Color.brandPrimary
         }
     }
 
@@ -381,8 +417,8 @@ struct SettingsView: View {
         case "AppIconDark": return Color.black
         case "AppIconLight": return Color.white
         case "AppIconPride": return Color.pink.opacity(0.15)
-        case "AppIconMono": return Color.secondary.opacity(0.15)
-        default: return Color.accentPrimary.opacity(0.1)
+        case "AppIconMono": return surface.textTertiary.opacity(0.15)
+        default: return Color.brandPrimary.opacity(0.1)
         }
     }
 

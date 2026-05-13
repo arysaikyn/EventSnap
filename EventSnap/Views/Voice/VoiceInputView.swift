@@ -1,13 +1,15 @@
 import SwiftUI
 
-/// Full-screen voice experience with waveform visualization, live transcription,
-/// stop button, and auto-stop countdown.
+/// Full-screen voice experience with premium waveform visualization, live transcription,
+/// stop button with countdown ring, and smooth spring animations.
+///
+/// Design: 95% neutral, 5% color — typography-first hierarchy on 8-pt grid.
 struct VoiceInputView: View {
     @Environment(VoiceViewModel.self) private var viewModel
     @Environment(\.colorScheme) private var colorScheme
 
     @State private var waveformOffset: CGFloat = 0
-    @State private var hasStarted = false
+    @State private var idlePhase: Double = 0
 
     /// Called when transcription completes with the final text.
     var onTranscriptionComplete: ((String) -> Void)?
@@ -15,93 +17,106 @@ struct VoiceInputView: View {
     private let barCount = 60
     private let barWidth: CGFloat = 6
 
+    // MARK: - Adaptive Colors
+
+    private var surfaceColor: Color {
+        colorScheme == .dark ? Color.surfaceBaseDark : Color.surfaceBase
+    }
+
+    private var textPrimary: Color {
+        colorScheme == .dark ? Color.textPrimaryDark : Color.textPrimary
+    }
+
+    private var textSecondary: Color {
+        colorScheme == .dark ? Color.textSecondaryDark : Color.textSecondary
+    }
+
+    private var textTertiary: Color {
+        colorScheme == .dark ? Color.textTertiaryDark : Color.textTertiary
+    }
+
+    private var surfaceSubtle: Color {
+        colorScheme == .dark ? Color.surfaceSubtleDark : Color.surfaceSubtle
+    }
+
+    // MARK: - Body
+
     var body: some View {
         ZStack {
-            backgroundColor
+            surfaceColor
                 .ignoresSafeArea()
 
             VStack(spacing: 0) {
-                // Top bar
-                HStack {
-                    OnDeviceBadge()
-                        .padding(.leading, 16)
-                        .padding(.top, 16)
-
-                    Spacer()
-                }
+                topBar
 
                 Spacer()
 
-                // Waveform visualization
                 waveformView
                     .frame(height: 180)
-                    .padding(.horizontal, 24)
+                    .padding(.horizontal, EventSpacing.xl)
 
                 Spacer()
 
-                // Live transcription
                 liveTranscriptionView
-                    .padding(.horizontal, 24)
+                    .padding(.horizontal, EventSpacing.xl)
 
                 Spacer()
 
-                // Stop button / auto-stop countdown
-                if viewModel.isRecording {
-                    stopButtonArea
-                        .padding(.bottom, 50)
-                } else if hasStarted {
-                    // Processing state
-                    VStack(spacing: 12) {
-                        IndeterminateProgressBar()
-                            .padding(.horizontal, 60)
-                        Text("Processing...")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                    }
-                    .padding(.bottom, 50)
-                } else {
-                    // Idle state - start recording prompt
-                    startPrompt
-                        .padding(.bottom, 60)
-                }
+                bottomArea
             }
-        }
-        .onAppear {
-            startRecording()
         }
         .onDisappear {
             if viewModel.isRecording {
-                viewModel.stopRecording()
+                viewModel.cancelRecording()
             }
         }
     }
 
-    // MARK: - Background
+    // MARK: - Top Bar
 
-    private var backgroundColor: Color {
-        colorScheme == .dark ? Color(.systemGray6) : Color(.systemGray6)
+    private var topBar: some View {
+        HStack {
+            OnDeviceBadge()
+                .padding(.leading, EventSpacing.pageMargin)
+                .padding(.top, EventSpacing.lg)
+
+            Spacer()
+        }
     }
 
-    // MARK: - Waveform
+    // MARK: - Waveform Visualization
 
     private var waveformView: some View {
         let levels = viewModel.audioLevels
-        let isIdle = !viewModel.isRecording && !hasStarted
+        let isIdle = !viewModel.isRecording && !viewModel.isProcessing && viewModel.recordingError == nil
 
         return GeometryReader { geometry in
             let spacing: CGFloat = 4
-            let totalWidth = CGFloat(barCount) * (barWidth + spacing)
-            let startX = (geometry.size.width - totalWidth) / 2
 
             HStack(spacing: spacing) {
                 ForEach(0..<barCount, id: \.self) { index in
                     RoundedRectangle(cornerRadius: 3)
-                        .fill(Color.accentPrimary)
+                        .fill(
+                            isIdle
+                                ? Color.brandPrimary.opacity(0.7)
+                                : Color.brandPrimary.opacity(barOpacity(at: index, levels: levels, isIdle: false))
+                        )
                         .frame(width: barWidth)
                         .frame(
                             maxHeight: isIdle
                                 ? idleBarHeight(at: index, totalHeight: geometry.size.height)
-                                : activeBarHeight(level: safeLevel(levels, index: index), totalHeight: geometry.size.height)
+                                : activeBarHeight(
+                                    level: safeLevel(levels, index: index),
+                                    totalHeight: geometry.size.height
+                                )
+                        )
+                        .animation(
+                            isIdle
+                                ? EventAnimation.gentle
+                                : EventAnimation.quick,
+                            value: isIdle
+                                ? Double(idlePhase)
+                                : Double(safeLevel(levels, index: index))
                         )
                 }
             }
@@ -112,6 +127,18 @@ struct VoiceInputView: View {
                 animateIdleWaveform()
             }
         }
+    }
+
+    /// Varying opacity creates depth — taller bars are more opaque.
+    private func barOpacity(at index: Int, levels: [Float], isIdle: Bool) -> CGFloat {
+        if isIdle {
+            let center = Double(barCount) / 2
+            let distance = abs(Double(index) - center)
+            let envelope = exp(-distance * distance / (Double(barCount) * 2.5))
+            return 0.40 + CGFloat(envelope) * 0.35
+        }
+        let level = safeLevel(levels, index: index)
+        return 0.45 + CGFloat(level) * 0.40
     }
 
     private func safeLevel(_ levels: [Float], index: Int) -> Float {
@@ -125,9 +152,7 @@ struct VoiceInputView: View {
         return minHeight + (maxHeight - minHeight) * CGFloat(level)
     }
 
-    // Idle state: gentle oscillating wave
-    @State private var idlePhase: Double = 0
-
+    /// Idle state: gentle sine wave oscillation with a gaussian envelope.
     private func idleBarHeight(at index: Int, totalHeight: CGFloat) -> CGFloat {
         let center = Double(barCount) / 2
         let distance = abs(Double(index) - center)
@@ -147,66 +172,149 @@ struct VoiceInputView: View {
 
     private var liveTranscriptionView: some View {
         ScrollView {
-            Text(viewModel.liveTranscription.isEmpty ? "Listening..." : viewModel.liveTranscription)
-                .font(.title3)
-                .foregroundColor(viewModel.liveTranscription.isEmpty ? .secondary : .primary)
+            Text(transcriptionDisplayText)
+                .font(EventTypography.headline)
+                .foregroundStyle(viewModel.liveTranscription.isEmpty ? textTertiary : textPrimary)
                 .multilineTextAlignment(.center)
-                .frame(maxWidth: .infinity)
-                .animation(.default, value: viewModel.liveTranscription)
+                .frame(maxWidth: .infinity, minHeight: 44)
+                .padding(.vertical, EventSpacing.sm)
+                .animation(EventAnimation.gentle, value: viewModel.liveTranscription)
         }
         .frame(maxHeight: 120)
-        .accessibilityLabel("Transcription: \(viewModel.liveTranscription.isEmpty ? "listening" : viewModel.liveTranscription)")
+        .scrollIndicators(.hidden)
+        .background(
+            RoundedRectangle(cornerRadius: EventRadius.medium)
+                .fill(surfaceSubtle.opacity(0.5))
+        )
+        .accessibilityLabel("Transcription: \(transcriptionDisplayText)")
+    }
+
+    private var transcriptionDisplayText: String {
+        if !viewModel.liveTranscription.isEmpty {
+            return viewModel.liveTranscription
+        }
+        if let error = viewModel.recordingError, !viewModel.isRecording {
+            return error
+        }
+        if viewModel.isRecording {
+            return "Listening… start speaking"
+        }
+        return "Tap the microphone and describe your event"
+    }
+
+    // MARK: - Bottom Area
+
+    @ViewBuilder
+    private var bottomArea: some View {
+        if viewModel.isRecording {
+            stopButtonArea
+                .padding(.bottom, 50)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+        } else if viewModel.isProcessing {
+            processingView
+                .padding(.bottom, 50)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+        } else {
+            startPrompt
+                .padding(.bottom, 60)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+        }
     }
 
     // MARK: - Stop Button
 
     private var stopButtonArea: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: EventSpacing.lg) {
+            // Recording indicator dot + duration hint
+            HStack(spacing: EventSpacing.sm) {
+                Circle()
+                    .fill(Color.red)
+                    .frame(width: 8, height: 8)
+
+                Text(viewModel.statusMessage)
+                    .font(EventTypography.captionMedium)
+                    .foregroundStyle(textSecondary)
+            }
+            .opacity(viewModel.silenceCountdown == nil ? 1 : 0)
+            .animation(EventAnimation.default_, value: viewModel.silenceCountdown)
+
             ZStack {
                 // Auto-stop countdown ring
                 if let countdown = viewModel.silenceCountdown {
+                    // Background ring
                     Circle()
-                        .stroke(Color.accentPrimary.opacity(0.3), lineWidth: 4)
-                        .frame(width: 64, height: 64)
+                        .stroke(Color.brandPrimary.opacity(0.12), lineWidth: 4)
+                        .frame(width: 72, height: 72)
 
+                    // Progress ring
                     Circle()
                         .trim(from: 0, to: CGFloat(countdown) / 3.0)
-                        .stroke(Color.accentPrimary, style: StrokeStyle(lineWidth: 4, lineCap: .round))
-                        .frame(width: 64, height: 64)
+                        .stroke(
+                            Color.brandPrimary,
+                            style: StrokeStyle(lineWidth: 4, lineCap: .round)
+                        )
+                        .frame(width: 72, height: 72)
                         .rotationEffect(.degrees(-90))
                         .animation(.linear(duration: 1), value: countdown)
 
+                    // Countdown number
                     Text("\(countdown)")
-                        .font(.title.weight(.bold))
-                        .foregroundColor(Color.accentPrimary)
+                        .font(EventTypography.bigNumber)
+                        .foregroundStyle(Color.brandPrimary)
+                        .contentTransition(.numericText())
+                        .animation(EventAnimation.snappy, value: countdown)
                 }
 
-                // Stop button
+                // Stop button — 56pt red circle with white stop icon
                 Button {
-                    let impact = UIImpactFeedbackGenerator(style: .medium)
-                    impact.impactOccurred()
+                    EventHaptics.press()
                     viewModel.stopRecording()
-                    hasStarted = false
                 } label: {
-                    Image(systemName: "stop.circle.fill")
-                        .font(.system(size: 56))
-                        .foregroundColor(.red)
-                        .background(
-                            Circle()
-                                .fill(.white)
-                                .frame(width: 44, height: 44)
+                    Circle()
+                        .fill(Color.red)
+                        .frame(width: 56, height: 56)
+                        .overlay(
+                            Image(systemName: "stop.fill")
+                                .font(.system(size: 20, weight: .bold))
+                                .foregroundColor(.white)
                         )
+                        .shadow(color: .red.opacity(0.35), radius: 12, x: 0, y: 4)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Stop recording")
-                .frame(minWidth: 44, minHeight: 44)
+                .frame(minWidth: EventSpacing.touchTarget, minHeight: EventSpacing.touchTarget)
             }
 
-            // Countdown hint
+            // Auto-stop hint
             if viewModel.silenceCountdown != nil {
-                Text("Auto-stopping...")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                Text("Auto-stopping…")
+                    .font(EventTypography.caption)
+                    .foregroundStyle(textTertiary)
+                    .transition(.opacity.combined(with: .scale(scale: 0.9)))
+            } else {
+                // Invisible placeholder to maintain layout
+                Color.clear
+                    .frame(height: 16)
+            }
+        }
+        .animation(EventAnimation.gentle, value: viewModel.silenceCountdown)
+    }
+
+    // MARK: - Processing
+
+    private var processingView: some View {
+        VStack(spacing: EventSpacing.lg) {
+            IndeterminateProgressBar()
+                .padding(.horizontal, 60)
+
+            HStack(spacing: EventSpacing.sm) {
+                ProgressView()
+                    .scaleEffect(0.8)
+                    .progressViewStyle(CircularProgressViewStyle(tint: textSecondary))
+
+                Text("Processing…")
+                    .font(EventTypography.callout)
+                    .foregroundStyle(textSecondary)
             }
         }
     }
@@ -214,32 +322,58 @@ struct VoiceInputView: View {
     // MARK: - Start Prompt
 
     private var startPrompt: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: EventSpacing.xl) {
+            // Icon
             Image(systemName: "waveform")
-                .font(.system(size: 40))
-                .foregroundColor(Color.accentPrimary)
+                .font(.system(size: 44, weight: .medium))
+                .foregroundStyle(Color.brandPrimary)
+                .symbolEffect(.pulse, options: .repeating)
 
+            // Title
             Text("Describe your event")
-                .font(.title3.weight(.semibold))
+                .font(EventTypography.sectionTitle)
+                .foregroundStyle(textPrimary)
 
-            Text("Say something like \"Lunch with Sarah next Tuesday at 1pm\"")
-                .font(.subheadline)
-                .foregroundColor(.secondary)
+            // Subtitle
+            Text("Say something like\n\"Lunch with Sarah next Tuesday at 1pm\"")
+                .font(EventTypography.subheadline)
+                .foregroundStyle(textTertiary)
                 .multilineTextAlignment(.center)
-                .padding(.horizontal, 32)
+                .lineSpacing(4)
+                .padding(.horizontal, EventSpacing.huge)
+
+            Button {
+                EventHaptics.press()
+                startRecording()
+            } label: {
+                HStack(spacing: EventSpacing.sm) {
+                    Image(systemName: "mic.fill")
+                        .font(.system(size: 18, weight: .semibold))
+                    Text("Tap to Speak")
+                        .font(EventTypography.bodyMedium)
+                }
+            }
+            .buttonStyle(PrimaryButtonStyle())
+            .padding(.horizontal, EventSpacing.xxl)
+
+            if let error = viewModel.recordingError {
+                Text(error)
+                    .font(EventTypography.footnote)
+                    .foregroundStyle(Color.semanticError)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, EventSpacing.xl)
+            }
         }
     }
 
     // MARK: - Actions
 
     private func startRecording() {
-        guard !hasStarted else { return }
-        hasStarted = true
+        guard !viewModel.isRecording && !viewModel.isProcessing else { return }
 
         viewModel.startRecording { transcription in
-            // Transcription complete - forward to coordinator
-            let haptic = UINotificationFeedbackGenerator()
-            haptic.notificationOccurred(.success)
+            // Transcription complete — forward to coordinator
+            EventHaptics.success()
             onTranscriptionComplete?(transcription)
         }
     }

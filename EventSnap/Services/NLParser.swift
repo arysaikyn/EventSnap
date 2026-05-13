@@ -135,8 +135,11 @@ enum NLParser {
     ///   - text: The raw text to parse (from OCR, speech, or keyboard).
     ///   - inputType: The input method used to obtain the text.
     /// - Returns: A `ParsedEvent` if any meaningful content was found,
-    ///            or `nil` if the text is empty or contains only noise.
+    ///            or `nil` if the text is empty, contains only noise, or is too long.
     static func parse(_ text: String, inputType: InputType) -> ParsedEvent? {
+        // Guard against excessively long inputs
+        guard text.count <= 5000 else { return nil }
+
         let normalized = normalizeText(text)
         guard !normalized.isEmpty else { return nil }
 
@@ -294,6 +297,8 @@ enum NLParser {
     private static func normalizeText(_ text: String) -> String {
         text
             .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "[\u{0000}-\u{0008}\u{000B}\u{000C}\u{000E}-\u{001F}]",
+                                  with: "", options: .regularExpression)
             .replacingOccurrences(of: "\n\n+", with: "\n", options: .regularExpression)
             .replacingOccurrences(of: " +", with: " ", options: .regularExpression)
     }

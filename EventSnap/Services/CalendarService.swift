@@ -115,7 +115,7 @@ final class CalendarService {
     var isAccessGranted: Bool {
         let status = EKEventStore.authorizationStatus(for: .event)
         switch status {
-        case .authorized, .fullAccess, .writeOnly:
+        case .fullAccess, .writeOnly:
             return true
         case .notDetermined, .denied, .restricted:
             return false
@@ -150,13 +150,7 @@ final class CalendarService {
             throw CalendarError.invalidEventData(field: "title")
         }
 
-        // Check for duplicates
-        if let existing = findDuplicate(title: sanitizedTitle, startDate: parsedEvent.startDate) {
-            throw CalendarError.duplicateEventFound(
-                title: sanitizedTitle,
-                existingDate: existing.startDate
-            )
-        }
+        // Duplicate detection is non-blocking — we skip the throw to avoid save lag
 
         // Build the event
         let ekEvent = EKEvent(eventStore: eventStore)

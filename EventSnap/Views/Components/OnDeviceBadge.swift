@@ -1,26 +1,33 @@
 import SwiftUI
 
-/// A pill-shaped badge showing the lock.shield.fill icon with "On-Device" text in privacy green.
+/// Privacy badge: "On-Device" with green shield icon.
+/// Placed in top-left of camera and voice views.
+/// Typography-first, minimal color.
 struct OnDeviceBadge: View {
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: EventSpacing.sm) {
             Image(systemName: "lock.shield.fill")
-                .font(.caption2.weight(.semibold))
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Color.semanticSuccess)
+
             Text("On-Device")
-                .font(.caption2.weight(.semibold))
+                .font(EventTypography.footnoteSemibold)
+                .foregroundStyle(
+                    colorScheme == .dark ? Color.textSecondaryDark : Color.textSecondary
+                )
         }
-        .foregroundColor(.white)
-        .padding(.horizontal, 10)
-        .frame(height: 24)
+        .padding(.horizontal, EventSpacing.md)
+        .padding(.vertical, EventSpacing.sm)
         .background(
             Capsule()
-                .fill(Color.privacyGreen)
+                .fill(colorScheme == .dark ? Color.surfaceSubtleDark.opacity(0.7) : Color.surfaceSubtle.opacity(0.7))
         )
-        .shadow(color: .black.opacity(0.15), radius: 3, x: 0, y: 1)
-        .accessibilityLabel("On-device processing")
-        .accessibilityHint("All data is processed locally on your device")
+        .overlay(
+            Capsule()
+                .stroke(colorScheme == .dark ? Color.borderSubtleDark : Color.borderSubtle, lineWidth: 1)
+        )
     }
 }
 
@@ -32,7 +39,6 @@ struct OnDeviceBadge_Previews: PreviewProvider {
             OnDeviceBadge()
                 .preferredColorScheme(.dark)
         }
-        .padding()
     }
 }
 #endif

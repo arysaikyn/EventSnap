@@ -1,7 +1,8 @@
 import SwiftUI
 
 /// Reusable event card with two variants: full and compact.
-/// Full variant includes all event fields; compact is a summarised row for confirmation.
+/// Typography-first, minimal color. Full variant for preview screen;
+/// compact for confirmation and history rows.
 struct EventCard: View {
     let event: ParsedEvent
     let variant: Variant
@@ -9,14 +10,15 @@ struct EventCard: View {
 
     @Environment(\.colorScheme) private var colorScheme
 
-    private var surfaceColor: Color {
-        colorScheme == .dark ? Color(.systemGray6) : .white
-    }
-
     init(event: ParsedEvent, variant: Variant = .full, onTapField: ((EventField) -> Void)? = nil) {
         self.event = event
         self.variant = variant
         self.onTapField = onTapField
+    }
+
+    enum Variant {
+        case full
+        case compact
     }
 
     var body: some View {
@@ -28,32 +30,31 @@ struct EventCard: View {
         }
     }
 
-    // MARK: - Full Card
+    // MARK: - Full Card (for preview screen)
 
     private var fullCard: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            // Header: category icon + title
-            HStack(spacing: 12) {
+        VStack(alignment: .leading, spacing: EventSpacing.lg) {
+            // Header: icon + title
+            HStack(spacing: EventSpacing.md) {
                 Image(systemName: eventCategoryIcon)
-                    .font(.title2)
-                    .foregroundColor(Color.accentPrimary)
+                    .font(.system(size: 22, weight: .medium))
+                    .foregroundStyle(Color.brandPrimary)
                     .frame(width: 32, height: 32)
 
                 Text(event.title)
-                    .font(.title.bold())
-                    .foregroundColor(.primary)
+                    .font(EventTypography.pageTitle)
+                    .foregroundStyle(colorScheme == .dark ? Color.textPrimaryDark : Color.textPrimary)
                     .lineLimit(2)
             }
             .frame(minHeight: 44)
             .contentShape(Rectangle())
-            .onTapGesture {
-                onTapField?(.title)
-            }
+            .onTapGesture { onTapField?(.title) }
             .accessibilityAddTraits(.isHeader)
-            .accessibilityLabel("Event title: \(event.title)")
 
-            Divider()
-                .overlay(colorScheme == .dark ? Color.white.opacity(0.2) : Color.black.opacity(0.1))
+            // Separator
+            Rectangle()
+                .fill(colorScheme == .dark ? Color.borderSubtleDark : Color.borderSubtle)
+                .frame(height: 0.5)
 
             // Date & Time
             fieldRow(icon: "calendar", label: dateDisplay, field: .date)
@@ -64,6 +65,8 @@ struct EventCard: View {
             // Location
             if let location = event.location, !location.isEmpty {
                 fieldRow(icon: "location.fill", label: location, field: .location)
+            } else if event.uncertainFields.contains(.location) {
+                fieldRow(icon: "location.fill", label: "tap to add location", field: .location)
             }
 
             // Notes
@@ -71,60 +74,68 @@ struct EventCard: View {
                 fieldRow(icon: "note.text", label: notes, field: .notes)
             }
 
-            // Uncertain fields
+            // Uncertain fields — amber warning badges
             ForEach(Array(event.uncertainFields), id: \.self) { field in
-                HStack(spacing: 6) {
+                HStack(spacing: EventSpacing.sm) {
                     Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.caption2)
-                        .foregroundColor(Color.accentPrimary)
-                    Text(fieldDisplayName(field))
-                        .font(.caption.weight(.medium))
-                        .foregroundColor(Color.accentPrimary)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Color.semanticWarning)
+
+                    Text("Needs \(fieldDisplayName(field))")
+                        .font(EventTypography.captionMedium)
+                        .foregroundStyle(Color.semanticWarning)
+
                     Spacer()
+
                     Image(systemName: "hand.tap")
-                        .font(.caption2)
-                        .foregroundColor(Color.accentPrimary.opacity(0.7))
+                        .font(.system(size: 12))
+                        .foregroundStyle(Color.semanticWarning.opacity(0.6))
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(Color.accentPrimary.opacity(0.1))
-                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .padding(.horizontal, EventSpacing.md)
+                .padding(.vertical, EventSpacing.sm)
+                .background(
+                    RoundedRectangle(cornerRadius: EventRadius.small)
+                        .fill(Color.semanticWarning.opacity(0.1))
+                )
                 .contentShape(Rectangle())
-                .onTapGesture {
-                    onTapField?(field)
-                }
-                .accessibilityLabel("Uncertain \(fieldDisplayName(field)), tap to clarify")
+                .onTapGesture { onTapField?(field) }
+                .accessibilityLabel("Needs \(fieldDisplayName(field)), tap to clarify")
             }
         }
-        .padding(20)
-        .background(surfaceColor)
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .shadow(color: .black.opacity(colorScheme == .dark ? 0.3 : 0.08), radius: 12, x: 0, y: 4)
+        .padding(EventSpacing.cardPadding)
+        .background(
+            RoundedRectangle(cornerRadius: EventSpacing.cardCornerRadius)
+                .fill(colorScheme == .dark ? Color.surfaceRaisedDark : Color.surfaceRaised)
+        )
+        .shadow(
+            color: .black.opacity(colorScheme == .dark ? 0.25 : 0.06),
+            radius: colorScheme == .dark ? 12 : 8, x: 0, y: colorScheme == .dark ? 4 : 2
+        )
     }
 
-    // MARK: - Compact Card
+    // MARK: - Compact Card (for confirmation and history)
 
     private var compactCard: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: EventSpacing.md) {
             Image(systemName: eventCategoryIcon)
-                .font(.title3)
-                .foregroundColor(Color.accentPrimary)
+                .font(.system(size: 18, weight: .medium))
+                .foregroundStyle(Color.brandPrimary)
                 .frame(width: 28, height: 28)
 
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: EventSpacing.xs) {
                 Text(event.title)
-                    .font(.headline.weight(.semibold))
+                    .font(EventTypography.headline)
+                    .foregroundStyle(colorScheme == .dark ? Color.textPrimaryDark : Color.textPrimary)
                     .lineLimit(1)
-                    .foregroundColor(.primary)
 
                 Text(compactDateDisplay)
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
+                    .font(EventTypography.subheadline)
+                    .foregroundStyle(colorScheme == .dark ? Color.textSecondaryDark : Color.textSecondary)
 
                 if let location = event.location, !location.isEmpty {
                     Label(location, systemImage: "location.fill")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                        .font(EventTypography.caption)
+                        .foregroundStyle(colorScheme == .dark ? Color.textTertiaryDark : Color.textTertiary)
                         .lineLimit(1)
                 }
             }
@@ -132,54 +143,61 @@ struct EventCard: View {
             Spacer()
 
             Image(systemName: "chevron.right")
-                .font(.caption)
-                .foregroundColor(.secondary)
+                .font(EventTypography.caption2)
+                .foregroundStyle(colorScheme == .dark ? Color.textTertiaryDark : Color.textTertiary)
         }
-        .padding(16)
-        .background(surfaceColor)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .shadow(color: .black.opacity(colorScheme == .dark ? 0.2 : 0.05), radius: 6, x: 0, y: 2)
+        .padding(EventSpacing.lg)
+        .background(
+            RoundedRectangle(cornerRadius: EventRadius.medium)
+                .fill(colorScheme == .dark ? Color.surfaceRaisedDark : Color.surfaceRaised)
+        )
+        .shadow(
+            color: .black.opacity(colorScheme == .dark ? 0.20 : 0.05),
+            radius: 6, x: 0, y: 2
+        )
     }
 
-    // MARK: - Helpers
+    // MARK: - Field Row
 
     private func fieldRow(icon: String, label: String, field: EventField) -> some View {
-        HStack(spacing: 10) {
+        HStack(spacing: EventSpacing.md) {
             Image(systemName: icon)
-                .font(.body)
-                .foregroundColor(Color.accentTeal)
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(Color.brandSecondary)
                 .frame(width: 24)
 
             Text(label)
-                .font(.body)
-                .foregroundColor(.primary)
+                .font(EventTypography.body)
+                .foregroundStyle(colorScheme == .dark ? Color.textPrimaryDark : Color.textPrimary)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
             if onTapField != nil {
                 Image(systemName: "pencil")
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
+                    .font(EventTypography.caption2)
+                    .foregroundStyle(colorScheme == .dark ? Color.textTertiaryDark : Color.textTertiary)
             }
         }
         .frame(minHeight: 44)
         .contentShape(Rectangle())
-        .onTapGesture {
-            onTapField?(field)
-        }
-        .accessibilityLabel("\(fieldDisplayName(field)): \(label)")
+        .onTapGesture { onTapField?(field) }
+    }
+
+    // MARK: - Helpers
+
+    private var eventCategoryIcon: String {
+        let lower = event.title.lowercased()
+        if lower.contains("meeting") || lower.contains("sync") { return "person.2.fill" }
+        if lower.contains("party") || lower.contains("birthday") || lower.contains("celebration") { return "party.popper" }
+        if lower.contains("dinner") || lower.contains("lunch") || lower.contains("food") { return "fork.knife" }
+        if lower.contains("flight") || lower.contains("travel") || lower.contains("trip") { return "airplane" }
+        if lower.contains("doctor") || lower.contains("appointment") { return "cross.case.fill" }
+        if lower.contains("concert") || lower.contains("show") || lower.contains("movie") { return "music.note" }
+        if lower.contains("class") || lower.contains("course") || lower.contains("workshop") { return "book.fill" }
+        return "calendar.badge.plus"
     }
 
     private var dateDisplay: String {
-        let start = event.startDate.eventDisplayDate
-        if let end = event.endDate {
-            let startDay = event.startDate.eventDisplayDate
-            let endDay = end.eventDisplayDate
-            if startDay == endDay {
-                return "\(startDay), \(timeDisplay)"
-            }
-            return "\(startDay) – \(endDay)"
-        }
-        return start
+        event.startDate.eventDisplayDate
     }
 
     private var timeDisplay: String {
@@ -191,85 +209,41 @@ struct EventCard: View {
     }
 
     private var compactDateDisplay: String {
-        if let end = event.endDate {
-            return "\(event.startDate.eventDisplayDateTime) – \(end.eventDisplayTime)"
+        event.startDate.eventDisplayDateTime
+    }
+
+    private func fieldDisplayName(_ field: EventField) -> String {
+        switch field {
+        case .title: return "title"
+        case .date: return "date"
+        case .time: return "time"
+        case .location: return "location"
+        case .notes: return "notes"
         }
-        return event.startDate.eventDisplayDateTime
-    }
-
-    private var eventCategoryIcon: String {
-        // Simple heuristic based on title keywords
-        let lower = event.title.lowercased()
-        if lower.contains("meeting") || lower.contains("sync") { return "person.2.fill" }
-        if lower.contains("party") || lower.contains("birthday") || lower.contains("celebration") { return "party.popper" }
-        if lower.contains("dinner") || lower.contains("lunch") || lower.contains("breakfast") || lower.contains("food") { return "fork.knife" }
-        if lower.contains("flight") || lower.contains("travel") || lower.contains("trip") { return "airplane" }
-        if lower.contains("doctor") || lower.contains("dentist") || lower.contains("appointment") { return "cross.fill" }
-        if lower.contains("gym") || lower.contains("workout") || lower.contains("fitness") { return "figure.run" }
-        if lower.contains("concert") || lower.contains("show") || lower.contains("movie") { return "music.note" }
-        return "calendar.badge.plus"
-    }
-
-    // MARK: - Variant
-
-    enum Variant {
-        case full
-        case compact
-    }
-}
-
-// MARK: - Field Display Names
-
-private func fieldDisplayName(_ field: EventField) -> String {
-    switch field {
-    case .title: return "Title"
-    case .date: return "Date"
-    case .time: return "Time"
-    case .location: return "Location"
-    case .notes: return "Notes"
     }
 }
 
 #if DEBUG
 struct EventCard_Previews: PreviewProvider {
     static var previews: some View {
-        ScrollView {
-            VStack(spacing: 20) {
-                EventCard(
-                    event: ParsedEvent(
-                        title: "Team Sync Meeting",
-                        startDate: Date(),
-                        endDate: Date().addingTimeInterval(7200),
-                        location: "Conference Room A",
-                        notes: "Bring quarterly report",
-                        calendar: nil,
-                        confidence: 0.92,
-                        uncertainFields: [.location],
-                        sourceText: "Team sync meeting tomorrow at 2pm in Conference Room A",
-                        inputType: .camera
-                    ),
-                    variant: .full
-                )
+        let event = ParsedEvent(
+            title: "Team Sync Meeting",
+            startDate: Date(),
+            endDate: Date().addingTimeInterval(7200),
+            location: "Conference Room A",
+            notes: "Bring quarterly report",
+            calendar: nil,
+            confidence: 0.85,
+            uncertainFields: [.location],
+            sourceText: "Team sync meeting tomorrow at 2pm",
+            inputType: .camera
+        )
 
-                EventCard(
-                    event: ParsedEvent(
-                        title: "Dinner with Alex",
-                        startDate: Date().addingTimeInterval(86400),
-                        endDate: Date().addingTimeInterval(86400 + 5400),
-                        location: nil,
-                        notes: nil,
-                        calendar: nil,
-                        confidence: 0.85,
-                        uncertainFields: [],
-                        sourceText: "Dinner with Alex tomorrow at 7",
-                        inputType: .voice
-                    ),
-                    variant: .compact
-                )
-            }
-            .padding()
+        VStack(spacing: 20) {
+            EventCard(event: event, variant: .full)
+            EventCard(event: event, variant: .compact)
         }
-        .background(Color(.systemGroupedBackground))
+        .padding()
     }
 }
 #endif

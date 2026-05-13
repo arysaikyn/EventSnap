@@ -97,9 +97,19 @@ final class SpeechService {
 
     // MARK: - Init
 
-    init(locale: Locale = Locale(identifier: "en-US")) {
+init(locale: Locale = Locale(identifier: "en-US")) {
         self.locale = locale
-        self.speechRecognizer = SFSpeechRecognizer(locale: locale) ?? SFSpeechRecognizer()!
+        // Graceful fallback: try requested locale → en-US → any available locale.
+        // If all fail, speech recognition is fundamentally unavailable on this device.
+        let recognizer = SFSpeechRecognizer(locale: locale)
+            ?? SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
+            ?? SFSpeechRecognizer()
+        guard let recognizer else {
+            // Speech recognition is a core iOS service. This only fails on
+            // simulators without speech support or deeply restricted devices.
+            fatalError("Speech recognition unavailable on this device.")
+        }
+        self.speechRecognizer = recognizer
         // Note: requiresOnDeviceProcessing was removed in newer iOS versions.
         // On-device processing is enforced via the speech recognition usage description.
         self.statusMessage = "Ready"
@@ -123,8 +133,8 @@ final class SpeechService {
             return true
         case .notDetermined:
             return await withCheckedContinuation { continuation in
-                SFSpeechRecognizer.requestAuthorization { [weak self] authStatus in
-                    Task { @MainActor in
+                SFSpeechRecognizer.requestAuthorization { authStatus in
+                    Task { @MainActor [weak self] in
                         let granted = authStatus == .authorized
                         self?.isAuthorized = granted
                         continuation.resume(returning: granted)
@@ -180,13 +190,35 @@ final class SpeechService {
         recognitionRequest.shouldReportPartialResults = true
         recognitionRequest.requiresOnDeviceRecognition = true // Force on-device
 
-        // Set up audio tap
+        // Set up audio tap — capture the request reference for the audio queue thread
+        // where append() is designed to be called. Only the audioLevel update
+        // needs to cross back to @MainActor.
         let inputNode = audioEngine.inputNode
         let recordingFormat = inputNode.outputFormat(forBus: 0)
+        let currentRequest = recognitionRequest
+        inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { buffer, _ in
+            // append() must be called on the audio thread per AVFoundation design
+            currentRequest.append(buffer)
 
-        inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { [weak self] buffer, _ in
-            self?.recognitionRequest?.append(buffer)
-            self?.updateAudioLevel(from: buffer)
+            // Calculate audio level on the audio thread (buffer is not Sendable,
+            // so we extract the Float value before crossing actor boundaries)
+            guard let channelData = buffer.floatChannelData else { return }
+            let channelDataValue = channelData.pointee
+            let frameLength = Int(buffer.frameLength)
+
+            var level: Float = 0
+            for i in 0..<frameLength {
+                level += abs(channelDataValue[i])
+            }
+            level /= Float(frameLength)
+
+            // Normalize to 0.0–1.0 (approximate range for speech)
+            let normalized = min(level * 5.0, 1.0)
+
+            // Dispatch only the Sendable Float value back to @MainActor
+            Task { @MainActor [weak self] in
+                self?.audioLevel = normalized
+            }
         }
 
         // Start audio engine
@@ -200,32 +232,38 @@ final class SpeechService {
         isRecording = true
         statusMessage = "Listening..."
 
-        // Start recognition task
-        recognitionTask = speechRecognizer.recognitionTask(with: recognitionRequest) { [weak self] result, error in
-            Task { @MainActor in
-                guard let self = self else { return }
+        // Start recognition task — extract Sendable values before crossing actor boundary
+        // to avoid capturing non-Sendable SFSpeechRecognitionResult across isolation boundaries.
+        recognitionTask = speechRecognizer.recognitionTask(with: recognitionRequest) { result, error in
+            // Extract Sendable values on the callback thread
+            let isFinal = result?.isFinal ?? false
+            let transcriptText = result?.bestTranscription.formattedString ?? ""
+            let errorDescription = (error as? NSError)?.localizedDescription
 
-                if let error = error as? NSError {
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+
+                if let errorDescription {
                     // Cancelled is not a real error — check via localized description
-                    if error.localizedDescription.lowercased().contains("cancelled") ||
-                       error.localizedDescription.lowercased().contains("canceled") {
+                    if errorDescription.lowercased().contains("cancelled") ||
+                       errorDescription.lowercased().contains("canceled") {
                         return
                     }
-                    self.lastError = .recognitionFailed(underlying: error.localizedDescription)
-                    self.statusMessage = "Error: \(error.localizedDescription)"
+                    self.lastError = .recognitionFailed(underlying: errorDescription)
+                    self.statusMessage = "Error: \(errorDescription)"
                     self.stopRecording()
                     return
                 }
 
-                if let result = result {
+                if !transcriptText.isEmpty {
                     // Update transcript
-                    self.transcript = result.bestTranscription.formattedString
+                    self.transcript = transcriptText
                     self.lastTranscriptionTime = Date()
 
                     // Reset silence timer on each new transcription
                     self.resetSilenceTimer()
 
-                    if result.isFinal {
+                    if isFinal {
                         self.finalTranscript = self.transcript
                         self.statusMessage = "Done"
                         self.isRecording = false
@@ -300,9 +338,9 @@ final class SpeechService {
     /// auto-stops the recording if no new transcription arrived.
     private func startSilenceTimer() {
         silenceTimer?.invalidate()
-        silenceTimer = Timer.scheduledTimer(withTimeInterval: silenceThreshold, repeats: false) { [weak self] _ in
-            Task { @MainActor in
-                guard let self = self, self.isRecording else { return }
+        silenceTimer = Timer.scheduledTimer(withTimeInterval: silenceThreshold, repeats: false) { _ in
+            Task { @MainActor [weak self] in
+                guard let self, self.isRecording else { return }
 
                 // Check how long since last transcription
                 let elapsed = Date().timeIntervalSince(self.lastTranscriptionTime)
@@ -315,27 +353,6 @@ final class SpeechService {
     }
 
     // MARK: - Audio Level
-
-    /// Updates the current audio level estimate for waveform visualization.
-    private func updateAudioLevel(from buffer: AVAudioPCMBuffer) {
-        guard let channelData = buffer.floatChannelData else { return }
-        let channelDataValue = channelData.pointee
-        let frameLength = Int(buffer.frameLength)
-
-        var level: Float = 0
-        for i in 0..<frameLength {
-            level += abs(channelDataValue[i])
-        }
-        level /= Float(frameLength)
-
-        // Normalize to 0.0–1.0 (approximate range for speech)
-        let normalized = min(level * 5.0, 1.0)
-        Task { @MainActor in
-            self.audioLevel = normalized
-        }
-    }
-
-    // MARK: - Status Checks
 
     /// Whether the speech recognizer is available on this device.
     var isRecognizerAvailable: Bool {

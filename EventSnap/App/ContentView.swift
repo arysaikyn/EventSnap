@@ -1,11 +1,9 @@
 import SwiftUI
 import SwiftData
 
-// MARK: - Content View (Coordinator)
+// MARK: - Content View (Premium Coordinator)
 
 struct ContentView: View {
-    // MARK: - State
-
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
     @State private var selectedTab: Tab = .capture
     @State private var inputMode: InputMode = .camera
@@ -15,12 +13,11 @@ struct ContentView: View {
     @Environment(PermissionManager.self) private var permissionManager
     @Environment(SpeechService.self) private var speechService
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.colorScheme) private var colorScheme
 
-    // OCRService is an actor — can't use @Environment, so create it here
     @State private var ocrService = OCRService()
 
     // MARK: - ViewModels (created here as coordinator)
-
     @State private var eventCreationVM: EventCreationViewModel?
     @State private var cameraVM: CameraViewModel?
     @State private var voiceVM: VoiceViewModel?
@@ -29,12 +26,10 @@ struct ContentView: View {
     @State private var settingsViewModel: SettingsViewModel?
 
     // MARK: - Navigation State
-
     @State private var showEventPreview = false
     @State private var showEventConfirmation = false
 
     // MARK: - Tab Enum
-
     enum Tab: String, CaseIterable, Identifiable {
         case capture
         case history
@@ -50,9 +45,17 @@ struct ContentView: View {
             }
         }
 
+        var selectedIconName: String {
+            switch self {
+            case .capture: return "camera.aperture"
+            case .history: return "clock.arrow.circlepath.fill"
+            case .settings: return "gearshape.fill"
+            }
+        }
+
         var title: String {
             switch self {
-            case .capture: return "Capture"
+            case .capture: return "Snap"
             case .history: return "History"
             case .settings: return "Settings"
             }
@@ -95,7 +98,6 @@ struct ContentView: View {
 
     // MARK: - Input Handler
 
-    /// Feeds input data into EventCreationViewModel and triggers the creation flow.
     private func handleInput(_ input: InputData) {
         guard let vm = eventCreationVM else { return }
         Task {
@@ -111,50 +113,41 @@ struct ContentView: View {
         }
     }
 
-    // MARK: - Main Tab View
+    // MARK: - Main Tab View (Premium Custom Tab Bar)
 
     private var mainTabView: some View {
-        TabView(selection: $selectedTab) {
-            // Capture Tab
-            NavigationStack {
-                captureContent
-                    .navigationTitle("EventSnap")
-                    .navigationBarTitleDisplayMode(.large)
-            }
-            .tabItem {
-                Label(Tab.capture.title, systemImage: Tab.capture.iconName)
-            }
-            .tag(Tab.capture)
-
-            // History Tab
-            NavigationStack {
-                if let historyViewModel {
-                    HistoryView()
-                        .environment(historyViewModel)
-                        .navigationTitle("History")
-                        .navigationBarTitleDisplayMode(.large)
+        ZStack(alignment: .bottom) {
+            // Content layers
+            Group {
+                switch selectedTab {
+                case .capture:
+                    captureContent
+                case .history:
+                    if let historyViewModel {
+                        NavigationStack {
+                            HistoryView(onNavigateToCapture: { selectedTab = .capture })
+                                .environment(historyViewModel)
+                                .navigationTitle("History")
+                                .navigationBarTitleDisplayMode(.large)
+                        }
+                    }
+                case .settings:
+                    if let settingsViewModel {
+                        NavigationStack {
+                            SettingsView()
+                                .environment(settingsViewModel)
+                                .navigationTitle("Settings")
+                                .navigationBarTitleDisplayMode(.large)
+                        }
+                    }
                 }
             }
-            .tabItem {
-                Label(Tab.history.title, systemImage: Tab.history.iconName)
-            }
-            .tag(Tab.history)
 
-            // Settings Tab
-            NavigationStack {
-                if let settingsViewModel {
-                    SettingsView()
-                        .environment(settingsViewModel)
-                        .navigationTitle("Settings")
-                        .navigationBarTitleDisplayMode(.large)
-                }
-            }
-            .tabItem {
-                Label(Tab.settings.title, systemImage: Tab.settings.iconName)
-            }
-            .tag(Tab.settings)
+            // Premium floating tab bar
+            customTabBar
         }
-        .tint(Color.accentPrimary)
+        .ignoresSafeArea(.keyboard)
+        .tint(Color.brandPrimary)
         // Observe creation state changes for navigation
         .onChange(of: eventCreationVM?.state) { _, newState in
             guard let newState else { return }
@@ -188,21 +181,84 @@ struct ContentView: View {
         }
     }
 
+    // MARK: - Custom Premium Tab Bar
+
+    private var customTabBar: some View {
+        VStack(spacing: 0) {
+            // Thin separator line
+            Rectangle()
+                .fill(colorScheme == .dark ? Color.borderSubtleDark : Color.borderSubtle)
+                .frame(height: 0.5)
+
+            HStack(spacing: 0) {
+                ForEach(Tab.allCases) { tab in
+                    Button {
+                        withAnimation(EventAnimation.tabSwitch) {
+                            selectedTab = tab
+                        }
+                        EventHaptics.tap()
+                    } label: {
+                        VStack(spacing: EventSpacing.xs) {
+                            Image(systemName: selectedTab == tab ? tab.selectedIconName : tab.iconName)
+                                .font(.system(size: 22, weight: .medium))
+                                .foregroundStyle(
+                                    selectedTab == tab
+                                    ? Color.brandPrimary
+                                    : Color.textTertiary
+                                )
+                                .frame(height: 24)
+
+                            Text(tab.title)
+                                .font(EventTypography.caption2)
+                                .foregroundStyle(
+                                    selectedTab == tab
+                                    ? Color.brandPrimary
+                                    : Color.textTertiary
+                                )
+                        }
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 48)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(tab.title)
+                    .accessibilityAddTraits(selectedTab == tab ? .isSelected : [])
+                }
+            }
+            .padding(.bottom, 4)
+            .background(
+                colorScheme == .dark
+                ? Color.surfaceBaseDark
+                : Color.surfaceRaised
+            )
+        }
+    }
+
     // MARK: - Capture Content
 
     @ViewBuilder
     private var captureContent: some View {
-        VStack(spacing: 0) {
-            InputSelector(selectedMode: $inputMode)
+        NavigationStack {
+            VStack(spacing: 0) {
+                // Input mode selector (premium pill)
+                InputSelector(selectedMode: $inputMode)
+                    .padding(.horizontal, EventSpacing.pageMargin)
+                    .padding(.top, EventSpacing.md)
+                    .padding(.bottom, EventSpacing.lg)
 
-            switch inputMode {
-            case .camera:
-                cameraView
-            case .voice:
-                voiceView
-            case .text:
-                textInputView
+                // Active input view
+                switch inputMode {
+                case .camera:
+                    cameraView
+                case .voice:
+                    voiceView
+                case .text:
+                    textInputView
+                }
             }
+            .background(colorScheme == .dark ? Color.surfaceBaseDark : Color.surfaceBase)
+            .navigationTitle("EventSnap")
+            .navigationBarTitleDisplayMode(.large)
         }
     }
 
@@ -227,6 +283,7 @@ struct ContentView: View {
                     handleInput(.transcription(text))
                 })
                 .environment(voiceVM)
+                .environment(permissionManager)
             }
         }
     }
@@ -242,8 +299,6 @@ struct ContentView: View {
         }
     }
 }
-
-// MARK: - Previews
 
 #Preview {
     ContentView()

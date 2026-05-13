@@ -1,76 +1,73 @@
 import SwiftUI
 
-/// Permission-denied overlay with explanation and an "Open Settings" button.
+/// Permission denied overlay — clean, actionable, typography-first.
 struct PermissionOverlay: View {
     let title: String
     let message: String
     let iconName: String
-
     @Environment(\.colorScheme) private var colorScheme
 
-    private var backgroundColor: Color {
-        colorScheme == .dark ? Color.black.opacity(0.85) : Color.white.opacity(0.95)
-    }
-
     var body: some View {
-        backgroundColor
-            .ignoresSafeArea()
-            .overlay(
-                VStack(spacing: 20) {
-                    Image(systemName: iconName)
-                        .font(.system(size: 48))
-                        .foregroundColor(Color.accentPrimary)
+        VStack(spacing: EventSpacing.xxl) {
+            // Icon in subtle circle
+            Image(systemName: iconName)
+                .font(.system(size: 40, weight: .light))
+                .foregroundStyle(Color.brandPrimary)
+                .frame(width: 80, height: 80)
+                .background(
+                    Circle()
+                        .fill(Color.brandPrimary.opacity(0.12))
+                )
 
-                    Text(title)
-                        .font(.title2.weight(.bold))
-                        .multilineTextAlignment(.center)
+            VStack(spacing: EventSpacing.sm) {
+                Text(title)
+                    .font(EventTypography.sectionTitle)
+                    .foregroundStyle(
+                        colorScheme == .dark ? Color.textPrimaryDark : Color.textPrimary
+                    )
 
-                    Text(message)
-                        .font(.body)
-                        .foregroundColor(.secondary)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 32)
+                Text(message)
+                    .font(EventTypography.subheadline)
+                    .foregroundStyle(
+                        colorScheme == .dark ? Color.textSecondaryDark : Color.textSecondary
+                    )
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, EventSpacing.xl)
+            }
 
-                    Button {
-                        if let url = URL(string: UIApplication.openSettingsURLString) {
-                            UIApplication.shared.open(url)
-                        }
-                    } label: {
-                        Label("Open Settings", systemImage: "gearshape")
-                            .font(.body.weight(.semibold))
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 28)
-                            .frame(height: 48)
-                            .background(
-                                Capsule()
-                                    .fill(Color.accentPrimary)
-                            )
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Open Settings to grant permission")
-                    .frame(minWidth: 44, minHeight: 44)
+            // Open Settings button
+            Button {
+                if let url = URL(string: UIApplication.openSettingsURLString) {
+                    UIApplication.shared.open(url)
                 }
-                .padding(24)
-            )
+            } label: {
+                Text("Open Settings")
+                    .font(EventTypography.bodyMedium)
+                    .foregroundStyle(.white)
+                    .frame(width: 200, height: EventSpacing.smallButtonHeight)
+                    .background(
+                        RoundedRectangle(cornerRadius: EventRadius.medium)
+                            .fill(Color.brandPrimary)
+                    )
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Open Settings to grant permission")
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(
+            colorScheme == .dark ? Color.surfaceBaseDark : Color.surfaceBase
+        )
     }
 }
 
 #if DEBUG
 struct PermissionOverlay_Previews: PreviewProvider {
     static var previews: some View {
-        Group {
-            PermissionOverlay(
-                title: "Camera Access Needed",
-                message: "EventSnap needs camera access to scan event flyers, posters, and invitations.",
-                iconName: "camera.fill"
-            )
-            PermissionOverlay(
-                title: "Microphone Access Needed",
-                message: "EventSnap needs microphone access to capture voice input for events.",
-                iconName: "mic.fill"
-            )
-            .preferredColorScheme(.dark)
-        }
+        PermissionOverlay(
+            title: "Camera Access Needed",
+            message: "EventSnap needs camera access to scan event flyers and invitations.",
+            iconName: "camera.fill"
+        )
     }
 }
 #endif

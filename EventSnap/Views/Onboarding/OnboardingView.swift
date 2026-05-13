@@ -1,35 +1,41 @@
 import SwiftUI
 
 /// 3-card onboarding shown on first launch. Appears only once via `hasCompletedOnboarding` flag.
+/// Premium design with brandPrimary, brandSecondary, semanticSuccess page colors, spring animations,
+/// capsule-shaped page indicators, and primary/ghost button styles from the design system.
 struct OnboardingView: View {
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
     @State private var currentPage = 0
     @Environment(\.colorScheme) private var colorScheme
+
+    private var surface: AdaptiveSurface {
+        AdaptiveSurface(scheme: colorScheme)
+    }
 
     private let pages: [OnboardingPage] = [
         OnboardingPage(
             icon: "camera.viewfinder",
             title: "Snap. Done.",
             subtitle: "Point your camera at any flyer, invitation, or screenshot.",
-            color: Color.accentPrimary
+            color: Color.brandPrimary
         ),
         OnboardingPage(
             icon: "waveform",
             title: "Speak Freely.",
             subtitle: "Just say what you need. We'll handle the rest.",
-            color: Color.accentTeal
+            color: Color.brandSecondary
         ),
         OnboardingPage(
             icon: "lock.shield.fill",
             title: "Your Privacy.",
             subtitle: "Everything stays on your device. Nothing leaves.",
-            color: Color.privacyGreen
+            color: Color.semanticSuccess
         )
     ]
 
     var body: some View {
         ZStack {
-            backgroundColor.ignoresSafeArea()
+            surface.background.ignoresSafeArea()
 
             VStack(spacing: 0) {
                 // Skip button
@@ -37,13 +43,12 @@ struct OnboardingView: View {
                     Spacer()
                     if currentPage < pages.count - 1 {
                         Button("Skip") {
+                            EventHaptics.tap()
                             completeOnboarding()
                         }
-                        .font(.body.weight(.medium))
-                        .foregroundColor(.secondary)
-                        .padding(.trailing, 24)
-                        .padding(.top, safeAreaTop + 8)
-                        .frame(minWidth: 44, minHeight: 44)
+                        .buttonStyle(GhostButtonStyle())
+                        .padding(.trailing, EventSpacing.pageMargin)
+                        .padding(.top, safeAreaTop + EventSpacing.sm)
                         .accessibilityLabel("Skip onboarding")
                     }
                 }
@@ -56,24 +61,28 @@ struct OnboardingView: View {
                     }
                 }
                 .tabViewStyle(.page(indexDisplayMode: .never))
-                .animation(.easeInOut, value: currentPage)
+                .animation(EventAnimation.gentle, value: currentPage)
 
                 // Bottom section: dots + button
-                VStack(spacing: 24) {
-                    // Page indicator dots
-                    HStack(spacing: 10) {
+                VStack(spacing: EventSpacing.xxl) {
+                    // Page indicator dots — animated capsule that expands when active
+                    HStack(spacing: EventSpacing.sm) {
                         ForEach(0..<pages.count, id: \.self) { index in
                             Capsule()
-                                .fill(currentPage == index ? pages[index].color : Color.secondary.opacity(0.3))
-                                .frame(width: currentPage == index ? 24 : 8, height: 8)
-                                .animation(.spring(response: 0.4, dampingFraction: 0.7), value: currentPage)
+                                .fill(currentPage == index ? pages[index].color : (colorScheme == .dark ? Color.textQuaternaryDark : Color.textQuaternary))
+                                .frame(
+                                    width: currentPage == index ? 28 : 8,
+                                    height: 8
+                                )
+                                .animation(EventAnimation.bouncy, value: currentPage)
                         }
                     }
 
                     // Action button
                     Button {
+                        EventHaptics.press()
                         if currentPage < pages.count - 1 {
-                            withAnimation {
+                            withAnimation(EventAnimation.gentle) {
                                 currentPage += 1
                             }
                         } else {
@@ -81,62 +90,48 @@ struct OnboardingView: View {
                         }
                     } label: {
                         Text(currentPage < pages.count - 1 ? "Next" : "Get Started")
-                            .font(.body.weight(.semibold))
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 52)
-                            .foregroundColor(.white)
-                            .background(
-                                RoundedRectangle(cornerRadius: 14)
-                                    .fill(pages[currentPage].color)
-                            )
-                            .padding(.horizontal, 24)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(PrimaryButtonStyle())
+                    .padding(.horizontal, EventSpacing.pageMargin)
                     .accessibilityLabel(currentPage < pages.count - 1 ? "Next page" : "Get started with EventSnap")
-                    .frame(minWidth: 44, minHeight: 44)
                 }
-                .padding(.bottom, 40)
+                .padding(.bottom, EventSpacing.huge)
             }
         }
-    }
-
-    // MARK: - Background
-
-    private var backgroundColor: Color {
-        colorScheme == .dark ? Color(.systemGray6) : .white
     }
 
     // MARK: - Page Content
 
     private func pageView(_ page: OnboardingPage) -> some View {
-        VStack(spacing: 30) {
+        VStack(spacing: EventSpacing.huge) {
             Spacer()
 
-            // Icon
+            // Icon in subtle circle
             ZStack {
                 Circle()
-                    .fill(page.color.opacity(0.15))
+                    .fill(page.color.opacity(0.12))
                     .frame(width: 140, height: 140)
 
                 Image(systemName: page.icon)
                     .font(.system(size: 56))
                     .foregroundColor(page.color)
             }
-            .padding(.bottom, 8)
+            .padding(.bottom, EventSpacing.sm)
 
             // Title
             Text(page.title)
-                .font(.largeTitle.weight(.bold))
-                .foregroundColor(.primary)
+                .font(EventTypography.pageTitle)
+                .foregroundColor(surface.textPrimary)
                 .multilineTextAlignment(.center)
 
             // Subtitle
             Text(page.subtitle)
-                .font(.title3)
-                .foregroundColor(.secondary)
+                .font(EventTypography.callout)
+                .foregroundColor(surface.textSecondary)
                 .multilineTextAlignment(.center)
-                .padding(.horizontal, 40)
+                .padding(.horizontal, EventSpacing.huge)
                 .fixedSize(horizontal: false, vertical: true)
+                .lineSpacing(4)
 
             Spacer()
             Spacer()
@@ -147,8 +142,7 @@ struct OnboardingView: View {
 
     private func completeOnboarding() {
         hasCompletedOnboarding = true
-        let impact = UINotificationFeedbackGenerator()
-        impact.notificationOccurred(.success)
+        EventHaptics.success()
     }
 
     private var safeAreaTop: CGFloat {

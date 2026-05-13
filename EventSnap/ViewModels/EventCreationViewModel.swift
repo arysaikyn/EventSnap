@@ -38,6 +38,7 @@ enum InputData {
 // MARK: - ViewModel
 
 @Observable
+@MainActor
 final class EventCreationViewModel {
     // MARK: - Published State
 
@@ -90,10 +91,10 @@ final class EventCreationViewModel {
             switch input {
             case .image(let image):
                 inputType = .camera
-                await updateProgress(0.2)
+                updateProgress(0.2)
 
                 let ocrResult = try await ocrService.recognizeText(from: image)
-                await updateProgress(0.6)
+                updateProgress(0.6)
                 sourceText = ocrResult.fullText
 
             case .text(let text):
@@ -105,13 +106,13 @@ final class EventCreationViewModel {
                 sourceText = text
             }
 
-            await updateProgress(0.7)
+            updateProgress(0.7)
 
             guard let result = NLParser.parse(sourceText, inputType: inputType) else {
                 throw EventError.parsingFailed(NSError(domain: "EventSnap", code: -1,
                     userInfo: [NSLocalizedDescriptionKey: "Could not parse event details from input."]))
             }
-            await updateProgress(0.9)
+            updateProgress(0.9)
 
             let event = ParsedEvent(
                 title: result.title,
@@ -127,19 +128,19 @@ final class EventCreationViewModel {
             )
 
             parsedEvent = event
-            await updateProgress(1.0)
+            updateProgress(1.0)
 
             state = .preview(event)
 
         } catch {
-            await handleError(error)
+            handleError(error)
         }
     }
 
     /// Transition: preview → confirming → completed | error
     func confirmEvent() async {
         guard let event = parsedEvent else {
-            await handleError(EventError.noEventToConfirm)
+            handleError(EventError.noEventToConfirm)
             return
         }
 
@@ -167,7 +168,7 @@ final class EventCreationViewModel {
             state = .completed(history)
 
         } catch {
-            await handleError(error)
+            handleError(error)
         }
     }
 
@@ -191,9 +192,16 @@ final class EventCreationViewModel {
         processingProgress = 0.0
     }
 
+    /// Retry from error state: clear error and return to idle so the user can try again.
+    func retryFromError() {
+        guard case .error = state else { return }
+        state = .idle
+        errorMessage = nil
+        processingProgress = 0.0
+    }
+
     // MARK: - Helpers
 
-    @MainActor
     private func updateProgress(_ value: Double) {
         processingProgress = value
         if case .processing = state {
@@ -201,7 +209,6 @@ final class EventCreationViewModel {
         }
     }
 
-    @MainActor
     private func handleError(_ error: Error) {
         let message: String
         if let eventError = error as? EventError {

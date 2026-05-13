@@ -1,4 +1,4 @@
-import Foundation
+@preconcurrency import Foundation
 import Vision
 #if canImport(UIKit)
 import UIKit

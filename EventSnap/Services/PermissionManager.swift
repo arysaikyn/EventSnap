@@ -50,9 +50,24 @@ final class PermissionManager {
         refreshAllStatuses()
     }
 
+    private var currentCalendarAccessStatus: EKAuthorizationStatus {
+        let status = EKEventStore.authorizationStatus(for: .event)
+        if #available(iOS 17.0, *) {
+            return status
+        }
+        return legacyCalendarStatus(status)
+    }
+
+    private func legacyCalendarStatus(_ status: EKAuthorizationStatus) -> EKAuthorizationStatus {
+        if status.rawValue == 3 {
+            return .fullAccess
+        }
+        return status
+    }
+
     /// Refreshes all cached authorization statuses without prompting the user.
     func refreshAllStatuses() {
-        calendarStatus = EKEventStore.authorizationStatus(for: .event)
+        calendarStatus = currentCalendarAccessStatus
         cameraStatus = AVCaptureDevice.authorizationStatus(for: .video)
         microphoneStatus = AVCaptureDevice.authorizationStatus(for: .audio)
         speechStatus = SFSpeechRecognizer.authorizationStatus()
@@ -65,11 +80,11 @@ final class PermissionManager {
     /// Uses iOS 17+'s `requestWriteOnlyAccessToEvents()` API to minimize data exposure.
     /// - Returns: `true` if access was granted.
     func requestCalendarAccess() async -> Bool {
-        guard !isRequesting else { return calendarStatus == .authorized }
+        guard !isRequesting else { return calendarStatus == .writeOnly || calendarStatus == .fullAccess }
         isRequesting = true
         defer { isRequesting = false }
 
-        let status = EKEventStore.authorizationStatus(for: .event)
+        let status = currentCalendarAccessStatus
         switch status {
         case .notDetermined:
             markExplanationShown(for: "calendar")
@@ -82,7 +97,7 @@ final class PermissionManager {
                 calendarStatus = .denied
                 return false
             }
-        case .writeOnly, .authorized, .fullAccess:
+        case .writeOnly, .fullAccess:
             calendarStatus = status
             return true
         case .restricted, .denied:

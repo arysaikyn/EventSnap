@@ -1,4 +1,4 @@
-=import SwiftUI
+import SwiftUI
 import SwiftData
 
 @main
@@ -10,15 +10,12 @@ struct EventSnapApp: App {
                 EventHistory.self,
             ])
             let configuration = ModelConfiguration(
-                schema: schema,
-                isStoredInMemoryOnly: false,
-                allowsSave: true
+                for: EventHistory.self,
+                isStoredInMemoryOnly: false
             )
             return try ModelContainer(for: schema, configurations: configuration)
         } catch {
-            // Log the error for debugging before crashing
             assertionFailure("Failed to create ModelContainer: \(error.localizedDescription)")
-            // In production, this is fatal — SwiftData is essential
             fatalError("Failed to create ModelContainer: \(error.localizedDescription)")
         }
     }()
@@ -67,6 +64,9 @@ struct EventSnapApp: App {
     // MARK: - Deep Link Handling
 
     private func handleDeepLink(_ url: URL) {
+        // Guard against excessively long URLs
+        guard url.absoluteString.count <= 2048 else { return }
+
         // Validate URL scheme
         guard url.scheme == "eventsnap" else { return }
 
@@ -82,17 +82,20 @@ struct EventSnapApp: App {
 
         switch host {
         case "capture":
-            // Future: navigate to capture tab
             break
         case "history":
-            // Future: navigate to history tab
             break
         case "event":
-            // Future: navigate to specific event by ID
-            // e.g., eventsnap://event/123
-            let pathComponents = components.path.components(separatedBy: "/").dropFirst()
-            if let eventId = pathComponents.first, !eventId.isEmpty {
-                // Future: navigate to specific event detail
+            let pathComponents = components.path
+                .components(separatedBy: "/")
+                .dropFirst()
+                .filter { !$0.isEmpty }
+
+            if let eventId = pathComponents.first,
+               !eventId.isEmpty,
+               eventId.count <= 64,
+               isValidPathComponent(eventId) {
+                // Future: navigate to specific event by ID
             }
             break
         default:
@@ -100,6 +103,12 @@ struct EventSnapApp: App {
         }
 
         pendingDeepLink = nil
+    }
+
+    /// Validates a path component for injection safety.
+    private func isValidPathComponent(_ component: String) -> Bool {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_"))
+        return component.unicodeScalars.allSatisfy { allowed.contains($0) }
     }
 
     // MARK: - Lifecycle Notifications (iOS <17 fallback)

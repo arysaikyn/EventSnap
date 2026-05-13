@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// Minimal text input screen with auto-expanding text area, paste button,
-/// and a "Parse Event" CTA button.
+/// Premium text input screen with auto-expanding text area, paste button,
+/// and a "Parse Event" CTA button. Uses the EventSnap design system.
 struct TextInputView: View {
     @Environment(TextInputViewModel.self) private var viewModel
     @FocusState private var isTextAreaFocused: Bool
@@ -18,62 +18,52 @@ struct TextInputView: View {
     private let minHeight: CGFloat = 200
     private let maxHeight: CGFloat = 400
 
+    private var surface: AdaptiveSurface {
+        AdaptiveSurface(scheme: colorScheme)
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             ScrollView {
-                VStack(spacing: 20) {
+                VStack(spacing: EventSpacing.xl) {
                     // Text area
                     textEditorSection
-                        .padding(.top, 24)
+                        .padding(.top, EventSpacing.xxl)
 
-                    // Paste button
+                    // Paste from clipboard button
                     if viewModel.hasClipboardContent && viewModel.textInput.isEmpty {
                         pasteButton
+                            .transition(.scale.combined(with: .opacity))
                     }
 
-                    // Validation error
+                    // Validation error banner
                     if showError, let error = viewModel.validationError {
-                        HStack(spacing: 6) {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .font(.caption)
-                                .foregroundColor(Color.accentPrimary)
-                            Text(error)
-                                .font(.caption)
-                                .foregroundColor(Color.accentPrimary)
-                        }
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 8)
-                        .background(Color.accentPrimary.opacity(0.1))
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        errorBanner(message: error)
+                            .transition(.move(edge: .top).combined(with: .opacity))
                     }
 
-                    // Parssing indicator
+                    // Processing indicator
                     if isParsing {
-                        VStack(spacing: 12) {
-                            ProgressBar(progress: 0.0, isPulsing: true)
-                                .padding(.horizontal, 40)
-                            Text("Parsing event details...")
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
-                        }
+                        processingIndicator
+                            .transition(.opacity)
                     }
                 }
-                .padding(.horizontal, 16)
+                .padding(.horizontal, EventSpacing.pageMargin)
+            }
+            .scrollDismissesKeyboard(.interactively)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                isTextAreaFocused = false
             }
 
-            // Parse Event button (at bottom, always visible)
+            // Bottom button bar
             VStack(spacing: 0) {
-                Divider()
-                    .overlay(colorScheme == .dark ? Color.white.opacity(0.1) : Color.black.opacity(0.05))
-
                 parseButton
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
-                    .background(
-                        colorScheme == .dark ? Color(.systemGray6) : Color(.systemBackground)
-                    )
+                    .padding(.horizontal, EventSpacing.pageMargin)
+                    .padding(.vertical, EventSpacing.lg)
             }
         }
+        .background(surface.background)
         .onAppear {
             viewModel.refreshClipboardStatus()
         }
@@ -82,22 +72,23 @@ struct TextInputView: View {
                 showError = false
             }
         }
-        .animation(.easeInOut(duration: 0.2), value: isTextAreaFocused)
+        .animation(EventAnimation.default_, value: isTextAreaFocused)
     }
 
     // MARK: - Text Editor
 
     private var textEditorSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: EventSpacing.xs) {
             ZStack(alignment: .topLeading) {
                 // Placeholder
-                if viewModel.textInput.isEmpty && !isTextAreaFocused {
+                if viewModel.textInput.isEmpty {
                     Text("Type or paste event details...")
-                        .font(.body)
-                        .foregroundColor(.secondary)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 14)
+                        .font(EventTypography.body)
+                        .foregroundStyle(surface.textTertiary)
+                        .padding(.horizontal, EventSpacing.md + 4)
+                        .padding(.vertical, EventSpacing.md + 2)
                         .allowsHitTesting(false)
+                        .transition(.opacity)
                 }
 
                 // Text editor
@@ -105,28 +96,24 @@ struct TextInputView: View {
                     get: { viewModel.textInput },
                     set: { viewModel.textInput = $0 }
                 ))
-                .font(.body)
+                .font(EventTypography.body)
                 .focused($isTextAreaFocused)
                 .frame(minHeight: minHeight, maxHeight: maxHeight)
                 .scrollContentBackground(.hidden)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 10)
-                .background(Color.clear)
+                .padding(.horizontal, EventSpacing.md)
+                .padding(.vertical, EventSpacing.sm)
+                .foregroundStyle(surface.textPrimary)
                 .accessibilityLabel("Event details text input")
                 .accessibilityHint("Type or paste event information to parse")
             }
-            .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(colorScheme == .dark ? Color(.systemGray5) : Color(.systemGray6))
-            )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12)
-                        .stroke(
-                            isTextAreaFocused ? Color.accentPrimary : Color.clear,
-                            lineWidth: 2
-                        )
-                )
-            .animation(.easeInOut(duration: 0.25), value: isTextAreaFocused)
+            .eventInput(isFocused: isTextAreaFocused)
+            .toolbar {
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Done") { isTextAreaFocused = false }
+                        .font(.body.weight(.medium))
+                }
+            }
         }
     }
 
@@ -135,32 +122,69 @@ struct TextInputView: View {
     private var pasteButton: some View {
         Button {
             viewModel.pasteFromClipboard()
-            let impact = UIImpactFeedbackGenerator(style: .light)
-            impact.impactOccurred()
+            EventHaptics.tap()
         } label: {
             Label("Paste from Clipboard", systemImage: "doc.on.clipboard")
-                .font(.subheadline.weight(.medium))
-                .foregroundColor(Color.accentTeal)
-                .padding(.horizontal, 20)
-                .frame(height: 44)
+                .font(EventTypography.subheadMedium)
+                .foregroundStyle(Color.brandSecondary)
+                .padding(.horizontal, EventSpacing.xl)
+                .frame(height: EventSpacing.smallButtonHeight)
                 .background(
                     Capsule()
-                        .stroke(Color.accentTeal, lineWidth: 1.5)
+                        .stroke(Color.brandSecondary, lineWidth: 1.5)
                 )
         }
         .buttonStyle(.plain)
-        .transition(.scale.combined(with: .opacity))
         .accessibilityLabel("Paste from clipboard")
-        .frame(minWidth: 44, minHeight: 44)
+        .frame(minWidth: EventSpacing.touchTarget, minHeight: EventSpacing.touchTarget)
+    }
+
+    // MARK: - Error Banner
+
+    private func errorBanner(message: String) -> some View {
+        HStack(spacing: EventSpacing.sm) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(EventTypography.footnote)
+                .foregroundStyle(Color.semanticError)
+
+            Text(message)
+                .font(EventTypography.footnote)
+                .foregroundStyle(Color.semanticError)
+                .lineLimit(2)
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, EventSpacing.lg)
+        .padding(.vertical, EventSpacing.md)
+        .background(
+            RoundedRectangle(cornerRadius: EventRadius.small)
+                .fill(Color.semanticError.opacity(0.1))
+        )
+    }
+
+    // MARK: - Processing Indicator
+
+    private var processingIndicator: some View {
+        VStack(spacing: EventSpacing.md) {
+            IndeterminateProgressBar()
+                .padding(.horizontal, EventSpacing.huge)
+
+            Text("Parsing event details...")
+                .font(EventTypography.subheadline)
+                .foregroundStyle(surface.textSecondary)
+        }
     }
 
     // MARK: - Parse Button
 
     private var parseButton: some View {
-        Button {
+        let isEmpty = viewModel.textInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let isDisabled = isEmpty || isParsing
+
+        return Button {
             parseAndSubmit()
         } label: {
-            HStack(spacing: 8) {
+            HStack(spacing: EventSpacing.sm) {
                 if isParsing {
                     ProgressView()
                         .progressViewStyle(.circular)
@@ -168,24 +192,27 @@ struct TextInputView: View {
                         .tint(.white)
                 } else {
                     Image(systemName: "sparkle.magnifyingglass")
+                        .font(.system(size: 18, weight: .medium))
                 }
+
                 Text("Parse Event")
-                    .font(.body.weight(.semibold))
+                    .font(EventTypography.bodyMedium)
             }
             .frame(maxWidth: .infinity)
-            .frame(height: 52)
-            .foregroundColor(.white)
+            .frame(height: EventSpacing.buttonHeight)
+            .foregroundStyle(.white)
             .background(
-                RoundedRectangle(cornerRadius: 14)
-                    .fill(parsedEvent != nil ? Color.privacyGreen : Color.accentPrimary)
-                    .opacity(viewModel.textInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 0.4 : 1.0)
+                RoundedRectangle(cornerRadius: EventRadius.medium)
+                    .fill(isDisabled ? Color.textTertiary : Color.brandPrimary)
             )
+            .scaleEffect(isDisabled ? 1.0 : 1.0)
         }
         .buttonStyle(.plain)
-        .disabled(viewModel.textInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isParsing)
+        .disabled(isDisabled)
+        .animation(EventAnimation.quick, value: isDisabled)
         .accessibilityLabel("Parse event")
         .accessibilityHint("Extracts event details from entered text")
-        .frame(minWidth: 44, minHeight: 44)
+        .frame(minWidth: EventSpacing.touchTarget, minHeight: EventSpacing.touchTarget)
         .keyboardShortcut(.return, modifiers: [])
     }
 
@@ -201,8 +228,7 @@ struct TextInputView: View {
             let trimmed = viewModel.textInput.trimmingCharacters(in: .whitespacesAndNewlines)
             onTextSubmitted(trimmed)
             isParsing = false
-            let haptic = UINotificationFeedbackGenerator()
-            haptic.notificationOccurred(.success)
+            EventHaptics.success()
             return
         }
 
@@ -215,8 +241,7 @@ struct TextInputView: View {
                 parsedEvent = event
                 isParsing = false
 
-                let haptic = UINotificationFeedbackGenerator()
-                haptic.notificationOccurred(.success)
+                EventHaptics.success()
 
                 // Pass to coordinator (standalone mode)
                 onEventParsed?(event)
@@ -224,8 +249,7 @@ struct TextInputView: View {
                 isParsing = false
                 showError = true
 
-                let haptic = UINotificationFeedbackGenerator()
-                haptic.notificationOccurred(.error)
+                EventHaptics.error()
             }
         }
     }

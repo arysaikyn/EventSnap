@@ -1,23 +1,23 @@
 import SwiftUI
 
-/// A bottom-of-card privacy disclosure line: lock icon + "Processed on-device"
+/// Privacy reassurance line: "Your data stays on this device."
+/// Used at the bottom of event preview and confirmation screens.
 struct PrivacyLine: View {
     @Environment(\.colorScheme) private var colorScheme
 
-    private var textColor: Color {
-        colorScheme == .dark ? Color.white.opacity(0.5) : Color.black.opacity(0.4)
-    }
-
     var body: some View {
-        HStack(spacing: 5) {
-            Image(systemName: "lock.shield")
-                .font(.caption2)
-            Text("Processed on-device")
-                .font(.caption2)
+        HStack(spacing: EventSpacing.sm) {
+            Image(systemName: "lock.shield.fill")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(Color.semanticSuccess)
+
+            Text("Your data stays on this device")
+                .font(EventTypography.footnote)
+                .foregroundStyle(
+                    colorScheme == .dark ? Color.textTertiaryDark : Color.textTertiary
+                )
         }
-        .foregroundColor(textColor)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Privacy: Processed on-device")
+        .padding(.vertical, EventSpacing.sm)
     }
 }
 
@@ -29,7 +29,6 @@ struct PrivacyLine_Previews: PreviewProvider {
             PrivacyLine()
                 .preferredColorScheme(.dark)
         }
-        .padding()
     }
 }
 #endif

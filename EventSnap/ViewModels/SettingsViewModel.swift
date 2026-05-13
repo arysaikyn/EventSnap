@@ -94,13 +94,13 @@ final class SettingsViewModel {
 
     /// Request camera access.
     func requestCameraAccess() async {
-        await permissionManager.requestCameraAccess()
+        _ = await permissionManager.requestCameraAccess()
         refreshPermissionStatuses()
     }
 
     /// Request microphone access.
     func requestMicrophoneAccess() async {
-        await permissionManager.requestMicrophoneAccess()
+        _ = await permissionManager.requestMicrophoneAccess()
         refreshPermissionStatuses()
     }
 
@@ -176,7 +176,6 @@ extension EKAuthorizationStatus: @retroactive CustomStringConvertible {
         case .notDetermined: return "Not Determined"
         case .restricted:    return "Restricted"
         case .denied:        return "Denied"
-        case .authorized:    return "Authorized"
         case .fullAccess:    return "Full Access"
         case .writeOnly:     return "Write Only"
         @unknown default:    return "Unknown"

@@ -5,14 +5,21 @@ import EventKitUI
 #endif
 
 /// Chronological list of added events with search, grouping, swipe-to-delete,
-/// and context menus.
+/// and context menus. Premium design using the EventSnap design system.
 struct HistoryView: View {
     @Environment(HistoryViewModel.self) private var viewModel
     @Environment(\.colorScheme) private var colorScheme
 
     @State private var isSearchActive = false
-    @State private var showEmptyState = false
     @State private var selectedEvent: EventHistory?
+    @State private var eventToDelete: EventHistory?
+
+    /// Called when the user wants to switch to the capture tab from empty state.
+    var onNavigateToCapture: (() -> Void)?
+
+    private var surface: AdaptiveSurface {
+        AdaptiveSurface(scheme: colorScheme)
+    }
 
     var body: some View {
         Group {
@@ -37,17 +44,37 @@ struct HistoryView: View {
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button {
-                    withAnimation(.spring(response: 0.3)) {
+                    EventHaptics.tap()
+                    withAnimation(EventAnimation.quick) {
                         isSearchActive.toggle()
                     }
                 } label: {
                     Image(systemName: isSearchActive ? "xmark.circle.fill" : "magnifyingglass")
-                        .font(.body)
-                        .foregroundColor(Color.accentPrimary)
-                        .frame(width: 44, height: 44)
+                        .font(.body.weight(.medium))
+                        .foregroundStyle(isSearchActive ? Color.textSecondary : Color.brandPrimary)
+                        .frame(width: EventSpacing.touchTarget, height: EventSpacing.touchTarget)
+                        .contentTransition(.symbolEffect(.replace))
                 }
                 .accessibilityLabel(isSearchActive ? "Close search" : "Search events")
-                .frame(minWidth: 44, minHeight: 44)
+            }
+        }
+        .tint(Color.brandPrimary)
+        .alert("Delete Event?", isPresented: Binding(
+            get: { eventToDelete != nil },
+            set: { if !$0 { eventToDelete = nil } }
+        )) {
+            Button("Cancel", role: .cancel) { eventToDelete = nil }
+            Button("Delete", role: .destructive) {
+                if let event = eventToDelete {
+                    withAnimation(EventAnimation.default_) {
+                        viewModel.deleteEvent(event)
+                    }
+                    eventToDelete = nil
+                }
+            }
+        } message: {
+            if let event = eventToDelete {
+                Text("\"\(event.title)\" will be removed from your history.")
             }
         }
     }
@@ -62,22 +89,23 @@ struct HistoryView: View {
                         eventRow(event)
                             .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                                 Button(role: .destructive) {
-                                    withAnimation {
-                                        viewModel.deleteEvent(event)
-                                    }
+                                    EventHaptics.heavy()
+                                    eventToDelete = event
                                 } label: {
                                     Label("Delete", systemImage: "trash")
                                 }
-                                .tint(.red)
+                                .tint(Color.semanticError)
                             }
                             .contextMenu {
                                 Button {
+                                    EventHaptics.press()
                                     viewModel.openInCalendar(event)
                                 } label: {
                                     Label("Open in Calendar", systemImage: "calendar")
                                 }
 
                                 Button {
+                                    EventHaptics.press()
                                     shareEvent(event)
                                 } label: {
                                     Label("Share", systemImage: "square.and.arrow.up")
@@ -86,9 +114,8 @@ struct HistoryView: View {
                                 Divider()
 
                                 Button(role: .destructive) {
-                                    withAnimation {
-                                        viewModel.deleteEvent(event)
-                                    }
+                                    EventHaptics.heavy()
+                                    eventToDelete = event
                                 } label: {
                                     Label("Delete", systemImage: "trash")
                                 }
@@ -100,6 +127,8 @@ struct HistoryView: View {
             }
         }
         .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .background(surface.background)
         .refreshable {
             viewModel.refresh()
         }
@@ -118,116 +147,170 @@ struct HistoryView: View {
 
     private func eventRow(_ event: EventHistory) -> some View {
         Button {
+            EventHaptics.tap()
             openEvent(event)
         } label: {
-            HStack(spacing: 12) {
-                // Category icon
-                Image(systemName: iconForEvent(event))
-                    .font(.title3)
-                    .foregroundColor(Color.accentPrimary)
-                    .frame(width: 32, height: 32)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(Color.accentPrimary.opacity(0.1))
-                    )
+            HStack(spacing: EventSpacing.lg) {
+                // Category icon in subtle colored circle
+                ZStack {
+                    Circle()
+                        .fill(iconColor(for: event).opacity(0.12))
+                        .frame(width: 40, height: 40)
 
-                VStack(alignment: .leading, spacing: 3) {
+                    Image(systemName: iconForEvent(event))
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(iconColor(for: event))
+                }
+
+                // Title + details
+                VStack(alignment: .leading, spacing: EventSpacing.xs) {
                     Text(event.title)
-                        .font(.headline.weight(.semibold))
-                        .foregroundColor(.primary)
+                        .font(EventTypography.subheadSemibold)
+                        .foregroundColor(surface.textPrimary)
                         .lineLimit(1)
 
-                    Text(event.formattedDate)
-                        .font(.callout)
-                        .foregroundColor(.secondary)
+                    HStack(spacing: 6) {
+                        Image(systemName: "clock")
+                            .font(.caption2)
+                            .foregroundStyle(surface.textTertiary)
+                        Text(event.formattedDate)
+                            .font(EventTypography.footnote)
+                            .foregroundColor(surface.textSecondary)
+                    }
 
                     if let location = event.location, !location.isEmpty {
-                        Label(location, systemImage: "location.fill")
-                            .font(.footnote)
-                            .foregroundColor(.secondary)
-                            .lineLimit(1)
+                        HStack(spacing: 4) {
+                            Image(systemName: "location.fill")
+                                .font(.caption2)
+                                .foregroundStyle(surface.textTertiary)
+                            Text(location)
+                                .font(EventTypography.caption)
+                                .foregroundColor(surface.textTertiary)
+                                .lineLimit(1)
+                        }
                     }
                 }
 
-                Spacer()
+                Spacer(minLength: EventSpacing.md)
 
-                // Input type indicator
+                // Input type badge
                 inputTypeBadge(event.inputType)
             }
-            .padding(.vertical, 4)
+            .padding(.vertical, EventSpacing.sm)
         }
         .buttonStyle(.plain)
-        .frame(minHeight: 44)
+        .listRowInsets(EdgeInsets(
+            top: 0,
+            leading: EventSpacing.lg,
+            bottom: 0,
+            trailing: EventSpacing.lg
+        ))
+        .listRowSeparator(.hidden)
+        .listRowBackground(
+            RoundedRectangle(cornerRadius: EventRadius.medium)
+                .fill(surface.raised)
+                .padding(.horizontal, EventSpacing.sm)
+                .padding(.vertical, 3)
+        )
+        .frame(minHeight: EventSpacing.touchTarget)
         .accessibilityLabel("\(event.title), \(event.formattedDate)")
+        .accessibilityHint("Double-tap to open in Calendar")
     }
 
     // MARK: - Section Header
 
     private func sectionHeader(for date: Date) -> some View {
-        HStack(spacing: 6) {
+        HStack(spacing: EventSpacing.sm) {
             if Calendar.current.isDateInToday(date) {
                 Image(systemName: "sun.max.fill")
                     .font(.caption)
-                    .foregroundColor(Color.accentPrimary)
+                    .foregroundStyle(Color.brandPrimary)
                 Text("Today")
-                    .font(.subheadline.weight(.semibold))
+                    .font(EventTypography.subheadSemibold)
+                    .foregroundColor(surface.textPrimary)
             } else if Calendar.current.isDateInYesterday(date) {
                 Image(systemName: "clock.arrow.circlepath")
                     .font(.caption)
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(Color.brandSecondary)
                 Text("Yesterday")
-                    .font(.subheadline.weight(.semibold))
+                    .font(EventTypography.subheadSemibold)
+                    .foregroundColor(surface.textPrimary)
             } else {
                 Image(systemName: "calendar")
                     .font(.caption)
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(surface.textTertiary)
                 Text(dateFormatter.string(from: date))
-                    .font(.subheadline.weight(.semibold))
+                    .font(EventTypography.subheadSemibold)
+                    .foregroundColor(surface.textPrimary)
             }
+
+            Spacer()
+
+            // Event count badge
+            let count = viewModel.events(for: date).count
+            Text("\(count)")
+                .font(EventTypography.caption2)
+                .foregroundStyle(surface.textTertiary)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 2)
+                .background(
+                    Capsule()
+                        .fill(surface.subtle)
+                )
         }
-        .foregroundColor(.primary)
+        .padding(.vertical, 4)
+        .listRowInsets(EdgeInsets(
+            top: 0,
+            leading: EventSpacing.lg,
+            bottom: 0,
+            trailing: EventSpacing.lg
+        ))
     }
 
     // MARK: - Empty State
 
     private var emptyStateView: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: EventSpacing.xxl) {
             Spacer()
 
-            Image(systemName: "calendar.badge.plus")
-                .font(.system(size: 56))
-                .foregroundColor(Color.accentPrimary.opacity(0.5))
+            // Large icon in a soft circle
+            ZStack {
+                Circle()
+                    .fill(Color.brandPrimary.opacity(0.08))
+                    .frame(width: 100, height: 100)
 
-            Text("No events yet")
-                .font(.title2.weight(.semibold))
-                .foregroundColor(.primary)
+                Image(systemName: "calendar.badge.plus")
+                    .font(.system(size: 40, weight: .light))
+                    .foregroundStyle(Color.brandPrimary.opacity(0.6))
+            }
 
-            Text("Events you create will appear here")
-                .font(.body)
-                .foregroundColor(.secondary)
-                .multilineTextAlignment(.center)
+            VStack(spacing: EventSpacing.sm) {
+                Text("No events yet")
+                    .font(EventTypography.sectionTitle)
+                    .foregroundColor(surface.textPrimary)
+
+                Text("Events you create will appear here")
+                    .font(EventTypography.body)
+                    .foregroundColor(surface.textSecondary)
+                    .multilineTextAlignment(.center)
+            }
 
             Button {
-                // Switch to capture tab - handled by parent coordinator
+                EventHaptics.press()
+                onNavigateToCapture?()
             } label: {
-                Label("Try Camera", systemImage: "camera.viewfinder")
-                    .font(.body.weight(.semibold))
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 28)
-                    .frame(height: 48)
-                    .background(
-                        Capsule()
-                            .fill(Color.accentPrimary)
-                    )
+                Label("Create First Event", systemImage: "camera.viewfinder")
             }
-            .buttonStyle(.plain)
-            .padding(.top, 8)
+            .buttonStyle(PrimaryButtonStyle())
+            .padding(.horizontal, EventSpacing.massive)
+            .padding(.top, EventSpacing.sm)
             .accessibilityLabel("Try camera input")
-            .frame(minWidth: 44, minHeight: 44)
 
             Spacer()
         }
-        .padding(32)
+        .padding(EventSpacing.huge)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(surface.background)
     }
 
     // MARK: - Helpers
@@ -243,17 +326,32 @@ struct HistoryView: View {
         return "calendar.badge.plus"
     }
 
+    private func iconColor(for event: EventHistory) -> Color {
+        let lower = event.title.lowercased()
+        if lower.contains("meeting") || lower.contains("sync") { return Color.brandPrimary }
+        if lower.contains("party") || lower.contains("birthday") || lower.contains("celebration") { return Color.semanticSuccess }
+        if lower.contains("dinner") || lower.contains("lunch") || lower.contains("food") { return Color.brandSecondary }
+        if lower.contains("flight") || lower.contains("travel") || lower.contains("trip") { return Color.brandPrimary }
+        if lower.contains("doctor") || lower.contains("appointment") { return Color.semanticError }
+        if lower.contains("concert") || lower.contains("show") || lower.contains("movie") { return Color.brandSecondary }
+        return Color.brandPrimary
+    }
+
     private func inputTypeBadge(_ inputType: InputType?) -> some View {
         Group {
             if let type = inputType {
                 Text(type.rawValue.capitalized)
-                    .font(.caption2.weight(.medium))
-                    .foregroundColor(badgeColor(for: type))
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
+                    .font(EventTypography.caption2)
+                    .foregroundStyle(badgeColor(for: type))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
                     .background(
                         Capsule()
                             .fill(badgeColor(for: type).opacity(0.12))
+                    )
+                    .overlay(
+                        Capsule()
+                            .stroke(badgeColor(for: type).opacity(0.2), lineWidth: 0.5)
                     )
             }
         }
@@ -261,14 +359,13 @@ struct HistoryView: View {
 
     private func badgeColor(for type: InputType) -> Color {
         switch type {
-        case .camera: return Color.accentPrimary
-        case .voice: return Color.accentTeal
-        case .text: return Color.privacyGreen
+        case .camera: return Color.brandPrimary
+        case .voice:  return Color.brandSecondary
+        case .text:   return Color.semanticSuccess
         }
     }
 
     private func openEvent(_ event: EventHistory) {
-        // Try to open in EKEventViewController
         viewModel.openInCalendar(event)
     }
 
@@ -292,7 +389,7 @@ struct HistoryView: View {
 #if DEBUG
 struct HistoryView_Previews: PreviewProvider {
     static var previews: some View {
-        let container = try! ModelContainer(for: EventHistory.self, 
+        let container = try! ModelContainer(for: EventHistory.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true))
         NavigationStack {
             HistoryView()
