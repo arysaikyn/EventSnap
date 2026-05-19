@@ -6,8 +6,6 @@ struct ProgressBar: View {
     let isPulsing: Bool
     @Environment(\.colorScheme) private var colorScheme
 
-    @State private var pulseOffset: CGFloat = -200
-
     var body: some View {
         GeometryReader { geometry in
             ZStack(alignment: .leading) {
@@ -16,26 +14,10 @@ struct ProgressBar: View {
                     .fill(colorScheme == .dark ? Color.surfaceDimDark : Color.surfaceDim)
 
                 if isPulsing {
-                    // Indeterminate shimmer
+                    // Indeterminate shimmer — uses DesignSystem skeleton pattern
                     RoundedRectangle(cornerRadius: 2)
-                        .fill(
-                            LinearGradient(
-                                colors: [
-                                    Color.brandPrimary.opacity(0.0),
-                                    Color.brandPrimary.opacity(0.6),
-                                    Color.brandPrimary.opacity(0.0),
-                                ],
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            )
-                        )
-                        .offset(x: pulseOffset)
-                        .frame(width: geometry.size.width * 0.4)
-                        .onAppear {
-                            withAnimation(.linear(duration: 1.5).repeatForever(autoreverses: false)) {
-                                pulseOffset = geometry.size.width + 200
-                            }
-                        }
+                        .fill(colorScheme == .dark ? Color.surfaceDimDark : Color.surfaceDim)
+                        .skeleton()
                 } else {
                     // Deterministic fill
                     RoundedRectangle(cornerRadius: 2)

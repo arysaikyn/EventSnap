@@ -1,68 +1,60 @@
 import SwiftUI
 
-/// Full-screen voice experience with premium waveform visualization, live transcription,
-/// stop button with countdown ring, and smooth spring animations.
+/// Premium voice input experience centered around a breathing orb,
+/// concentric rings reacting to audio, and a refined transcription flow.
 ///
-/// Design: 95% neutral, 5% color — typography-first hierarchy on 8-pt grid.
+/// Design philosophy: meditative, spacious, warm — zero-cloud privacy
+/// is the hero. The orb breathes when idle, expands when recording,
+/// and rings pulse outward with the user's voice.
 struct VoiceInputView: View {
     @Environment(VoiceViewModel.self) private var viewModel
     @Environment(\.colorScheme) private var colorScheme
 
-    @State private var waveformOffset: CGFloat = 0
     @State private var idlePhase: Double = 0
+    @State private var showOrb = true
 
-    /// Called when transcription completes with the final text.
     var onTranscriptionComplete: ((String) -> Void)?
 
     private let barCount = 60
-    private let barWidth: CGFloat = 6
+    private let barWidth: CGFloat = 5
 
     // MARK: - Adaptive Colors
 
-    private var surfaceColor: Color {
-        colorScheme == .dark ? Color.surfaceBaseDark : Color.surfaceBase
-    }
-
     private var textPrimary: Color {
-        colorScheme == .dark ? Color.textPrimaryDark : Color.textPrimary
+        colorScheme == .dark ? .textPrimaryDark : .textPrimary
     }
 
     private var textSecondary: Color {
-        colorScheme == .dark ? Color.textSecondaryDark : Color.textSecondary
+        colorScheme == .dark ? .textSecondaryDark : .textSecondary
     }
 
     private var textTertiary: Color {
-        colorScheme == .dark ? Color.textTertiaryDark : Color.textTertiary
-    }
-
-    private var surfaceSubtle: Color {
-        colorScheme == .dark ? Color.surfaceSubtleDark : Color.surfaceSubtle
+        colorScheme == .dark ? .textTertiaryDark : .textTertiary
     }
 
     // MARK: - Body
 
     var body: some View {
         ZStack {
-            surfaceColor
+            // Background gradient — subtle radial warmth from top
+            EventGradient.voiceBackground
                 .ignoresSafeArea()
 
             VStack(spacing: 0) {
                 topBar
 
-                Spacer()
+                if viewModel.isRecording || viewModel.isProcessing {
+                    // Active state: orb + rings + transcription
+                    activeVoiceArea
+                } else if viewModel.recordingError != nil {
+                    // Error state
+                    errorArea
+                } else {
+                    // Idle state: invitation to speak
+                    idleArea
+                }
 
-                waveformView
-                    .frame(height: 180)
-                    .padding(.horizontal, EventSpacing.xl)
-
-                Spacer()
-
-                liveTranscriptionView
-                    .padding(.horizontal, EventSpacing.xl)
-
-                Spacer()
-
-                bottomArea
+                bottomActionArea
             }
         }
         .onDisappear {
@@ -70,6 +62,9 @@ struct VoiceInputView: View {
                 viewModel.cancelRecording()
             }
         }
+        .animation(EventAnimation.gentle, value: viewModel.isRecording)
+        .animation(EventAnimation.gentle, value: viewModel.isProcessing)
+        .animation(EventAnimation.gentle, value: viewModel.recordingError)
     }
 
     // MARK: - Top Bar
@@ -84,87 +79,187 @@ struct VoiceInputView: View {
         }
     }
 
-    // MARK: - Waveform Visualization
+    // MARK: - Active Voice Area (recording / processing)
 
-    private var waveformView: some View {
-        let levels = viewModel.audioLevels
-        let isIdle = !viewModel.isRecording && !viewModel.isProcessing && viewModel.recordingError == nil
+    private var activeVoiceArea: some View {
+        VStack(spacing: 0) {
+            Spacer()
 
-        return GeometryReader { geometry in
-            let spacing: CGFloat = 4
+            // Orb + concentric rings — the visual hero
+            ZStack {
+                ConcentricRings(
+                    audioLevel: maxAudioLevel,
+                    isRecording: viewModel.isRecording
+                )
 
-            HStack(spacing: spacing) {
-                ForEach(0..<barCount, id: \.self) { index in
-                    RoundedRectangle(cornerRadius: 3)
-                        .fill(
-                            isIdle
-                                ? Color.brandPrimary.opacity(0.7)
-                                : Color.brandPrimary.opacity(barOpacity(at: index, levels: levels, isIdle: false))
-                        )
-                        .frame(width: barWidth)
-                        .frame(
-                            maxHeight: isIdle
-                                ? idleBarHeight(at: index, totalHeight: geometry.size.height)
-                                : activeBarHeight(
-                                    level: safeLevel(levels, index: index),
-                                    totalHeight: geometry.size.height
-                                )
-                        )
-                        .animation(
-                            isIdle
-                                ? EventAnimation.gentle
-                                : EventAnimation.quick,
-                            value: isIdle
-                                ? Double(idlePhase)
-                                : Double(safeLevel(levels, index: index))
-                        )
+                BreathingOrb(
+                    isRecording: viewModel.isRecording,
+                    audioLevel: maxAudioLevel
+                )
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: EventSpacing.huge * 3)
+
+            Spacer()
+
+            // Live transcription
+            liveTranscriptionView
+                .padding(.horizontal, EventSpacing.xl)
+
+            Spacer()
+        }
+    }
+
+    // MARK: - Error Area
+
+    private var errorArea: some View {
+        VStack(spacing: EventSpacing.xl) {
+            Spacer()
+
+            Image(systemName: "mic.slash.circle.fill")
+                .font(EventTypography.errorIcon)
+                .foregroundStyle(Color.semanticError)
+                .symbolEffect(.bounce, value: true)
+
+            if let error = viewModel.recordingError {
+                Text(error)
+                    .font(EventTypography.headline)
+                    .foregroundStyle(textPrimary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, EventSpacing.huge)
+
+                Button("Try Again") {
+                    EventHaptics.tap()
+                    startRecording()
                 }
+                .buttonStyle(EnhancedPrimaryButtonStyle(icon: "arrow.clockwise"))
+                .padding(.horizontal, EventSpacing.xxl)
             }
-            .position(x: geometry.size.width / 2, y: geometry.size.height / 2)
+
+            Spacer()
         }
-        .onAppear {
-            if isIdle {
-                animateIdleWaveform()
+    }
+
+    // MARK: - Idle Area
+
+    private var idleArea: some View {
+        VStack(spacing: EventSpacing.xl) {
+            Spacer()
+
+            // Large breathing orb
+            BreathingOrb(
+                isRecording: false,
+                audioLevel: idleOrbLevel
+            )
+            .frame(height: EventSpacing.huge * 3)
+
+            // Invitation text
+            Text("Describe your event")
+                .font(EventTypography.pageTitle)
+                .foregroundStyle(textPrimary)
+
+            Text("Say something like\n\"Lunch with Sarah next Tuesday at 1pm\"")
+                .font(EventTypography.subheadline)
+                .foregroundStyle(textTertiary)
+                .multilineTextAlignment(.center)
+                .lineSpacing(4)
+
+            // Waveform preview — 60 gradient bars
+            idleWaveformPreview
+                .frame(height: EventSpacing.xl)
+                .padding(.horizontal, EventSpacing.xxl)
+
+            Spacer()
+        }
+    }
+
+    // MARK: - Bottom Action Area
+
+    @ViewBuilder
+    private var bottomActionArea: some View {
+        if viewModel.isRecording {
+            recordingControls
+                .padding(.bottom, EventSpacing.bottomSafe)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+        } else if viewModel.isProcessing {
+            processingIndicator
+                .padding(.bottom, EventSpacing.bottomSafe)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+        } else {
+            startRecordingButton
+                .padding(.bottom, EventSpacing.bottomSafe)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+        }
+    }
+
+    // MARK: - Recording Controls
+
+    private var recordingControls: some View {
+        VStack(spacing: EventSpacing.lg) {
+            // Status pill
+            VoiceStatusPill(
+                status: recordingPillStatus
+            )
+
+            // Stop button with countdown ring
+            ZStack {
+                // Countdown ring (visible during silence countdown)
+                if let countdown = viewModel.silenceCountdown {
+                    Circle()
+                        .stroke(Color.brandPrimary.opacity(0.12), lineWidth: 3)
+                        .frame(width: EventSpacing.xl * 1.5, height: EventSpacing.xl * 1.5)
+
+                    Circle()
+                        .trim(from: 0, to: CGFloat(countdown) / 3.0)
+                        .stroke(
+                            Color.brandPrimary,
+                            style: StrokeStyle(lineWidth: 3, lineCap: .round)
+                        )
+                        .frame(width: EventSpacing.xl * 1.5, height: EventSpacing.xl * 1.5)
+                        .rotationEffect(.degrees(-90))
+                        .animation(EventAnimation.countdown, value: countdown)
+                }
+
+                // Stop button
+                Button {
+                    EventHaptics.press()
+                    viewModel.stopRecording()
+                } label: {
+                    Circle()
+                        .fill(.red)
+                        .frame(width: EventSpacing.xl, height: EventSpacing.xl)
+                        .overlay(
+                            Image(systemName: "stop.fill")
+                                .font(EventTypography.stopIcon)
+                                .foregroundStyle(.white)
+                        )
+                        .shadow(color: .red.opacity(0.3), radius: 10, x: 0, y: 3)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Stop recording")
             }
         }
+        .animation(EventAnimation.gentle, value: viewModel.silenceCountdown)
     }
 
-    /// Varying opacity creates depth — taller bars are more opaque.
-    private func barOpacity(at index: Int, levels: [Float], isIdle: Bool) -> CGFloat {
-        if isIdle {
-            let center = Double(barCount) / 2
-            let distance = abs(Double(index) - center)
-            let envelope = exp(-distance * distance / (Double(barCount) * 2.5))
-            return 0.40 + CGFloat(envelope) * 0.35
+    // MARK: - Processing Indicator
+
+    private var processingIndicator: some View {
+        VStack(spacing: EventSpacing.lg) {
+            VoiceStatusPill(status: .processing)
+                .transition(.opacity)
         }
-        let level = safeLevel(levels, index: index)
-        return 0.45 + CGFloat(level) * 0.40
     }
 
-    private func safeLevel(_ levels: [Float], index: Int) -> Float {
-        guard index < levels.count else { return 0 }
-        return levels[index]
-    }
+    // MARK: - Start Recording Button
 
-    private func activeBarHeight(level: Float, totalHeight: CGFloat) -> CGFloat {
-        let minHeight: CGFloat = 4
-        let maxHeight = totalHeight * 0.9
-        return minHeight + (maxHeight - minHeight) * CGFloat(level)
-    }
-
-    /// Idle state: gentle sine wave oscillation with a gaussian envelope.
-    private func idleBarHeight(at index: Int, totalHeight: CGFloat) -> CGFloat {
-        let center = Double(barCount) / 2
-        let distance = abs(Double(index) - center)
-        let envelope = exp(-distance * distance / (Double(barCount) * 2.5))
-        let oscillation = sin((Double(index) * 0.3) + idlePhase)
-        let value = envelope * (0.3 + 0.3 * oscillation)
-        return max(4, totalHeight * CGFloat(value) * 0.8)
-    }
-
-    private func animateIdleWaveform() {
-        withAnimation(.linear(duration: 2).repeatForever(autoreverses: false)) {
-            idlePhase = .pi * 2
+    private var startRecordingButton: some View {
+        VStack(spacing: EventSpacing.lg) {
+            Button("Tap to Speak") {
+                startRecording()
+            }
+            .buttonStyle(EnhancedPrimaryButtonStyle(icon: "mic.fill"))
+            .padding(.horizontal, EventSpacing.xxl)
         }
     }
 
@@ -176,193 +271,99 @@ struct VoiceInputView: View {
                 .font(EventTypography.headline)
                 .foregroundStyle(viewModel.liveTranscription.isEmpty ? textTertiary : textPrimary)
                 .multilineTextAlignment(.center)
-                .frame(maxWidth: .infinity, minHeight: 44)
+                .frame(maxWidth: .infinity, minHeight: EventSpacing.smallButtonHeight)
                 .padding(.vertical, EventSpacing.sm)
-                .animation(EventAnimation.gentle, value: viewModel.liveTranscription)
         }
-        .frame(maxHeight: 120)
+        .frame(maxHeight: EventSpacing.huge * 2)
         .scrollIndicators(.hidden)
         .background(
             RoundedRectangle(cornerRadius: EventRadius.medium)
-                .fill(surfaceSubtle.opacity(0.5))
+                .fill(Color.surfaceSubtle.opacity(0.4))
         )
+        .padding(.horizontal, EventSpacing.xl)
         .accessibilityLabel("Transcription: \(transcriptionDisplayText)")
+        .animation(EventAnimation.gentle, value: viewModel.liveTranscription)
+    }
+
+    // MARK: - Idle Waveform Preview
+
+    private var idleWaveformPreview: some View {
+        let total = barCount
+
+        return GeometryReader { geometry in
+            let spacing: CGFloat = 3
+            let barW = barWidth
+
+            HStack(spacing: spacing) {
+                ForEach(0..<total, id: \.self) { index in
+                    WaveformBar(
+                        index: index,
+                        height: idleBarHeight(
+                            at: index,
+                            total: geometry.size.height,
+                            totalBars: total
+                        ),
+                        isIdle: true,
+                        phase: idlePhase,
+                        barWidth: barW
+                    )
+                    .animation(
+                        EventAnimation.idleWaveform,
+                        value: idlePhase
+                    )
+                }
+            }
+            .position(x: geometry.size.width / 2, y: geometry.size.height / 2)
+        }
+        .onAppear { animateIdleWaveform() }
+    }
+
+    // MARK: - Computed Properties
+
+    private var maxAudioLevel: CGFloat {
+        guard !viewModel.audioLevels.isEmpty else { return 0 }
+        let clamped = viewModel.audioLevels.map { Swift.max($0, 0.05) }
+        return CGFloat(clamped.max() ?? 0.05)
+    }
+
+    private var idleOrbLevel: CGFloat {
+        cos(idlePhase) * 0.5 + 0.5
+    }
+
+    private var recordingPillStatus: VoiceStatusPill.VoiceStatus {
+        if let countdown = viewModel.silenceCountdown {
+            return .countdown(remaining: countdown)
+        }
+        return .recording(seconds: 0)
     }
 
     private var transcriptionDisplayText: String {
         if !viewModel.liveTranscription.isEmpty {
             return viewModel.liveTranscription
         }
-        if let error = viewModel.recordingError, !viewModel.isRecording {
-            return error
-        }
         if viewModel.isRecording {
             return "Listening… start speaking"
+        }
+        if viewModel.isProcessing {
+            return "Processing your transcription…"
         }
         return "Tap the microphone and describe your event"
     }
 
-    // MARK: - Bottom Area
+    // MARK: - Idle Waveform Animation
 
-    @ViewBuilder
-    private var bottomArea: some View {
-        if viewModel.isRecording {
-            stopButtonArea
-                .padding(.bottom, 50)
-                .transition(.move(edge: .bottom).combined(with: .opacity))
-        } else if viewModel.isProcessing {
-            processingView
-                .padding(.bottom, 50)
-                .transition(.move(edge: .bottom).combined(with: .opacity))
-        } else {
-            startPrompt
-                .padding(.bottom, 60)
-                .transition(.move(edge: .bottom).combined(with: .opacity))
-        }
+    private func idleBarHeight(at index: Int, total: CGFloat, totalBars: Int) -> CGFloat {
+        let center = Double(totalBars) / 2
+        let distance = abs(Double(index) - center)
+        let envelope = exp(-distance * distance / (Double(totalBars) * 2.0))
+        let oscillation = sin((Double(index) * 0.25) + idlePhase)
+        let value = envelope * (0.3 + 0.3 * oscillation)
+        return max(4, total * CGFloat(value) * 0.7)
     }
 
-    // MARK: - Stop Button
-
-    private var stopButtonArea: some View {
-        VStack(spacing: EventSpacing.lg) {
-            // Recording indicator dot + duration hint
-            HStack(spacing: EventSpacing.sm) {
-                Circle()
-                    .fill(Color.red)
-                    .frame(width: 8, height: 8)
-
-                Text(viewModel.statusMessage)
-                    .font(EventTypography.captionMedium)
-                    .foregroundStyle(textSecondary)
-            }
-            .opacity(viewModel.silenceCountdown == nil ? 1 : 0)
-            .animation(EventAnimation.default_, value: viewModel.silenceCountdown)
-
-            ZStack {
-                // Auto-stop countdown ring
-                if let countdown = viewModel.silenceCountdown {
-                    // Background ring
-                    Circle()
-                        .stroke(Color.brandPrimary.opacity(0.12), lineWidth: 4)
-                        .frame(width: 72, height: 72)
-
-                    // Progress ring
-                    Circle()
-                        .trim(from: 0, to: CGFloat(countdown) / 3.0)
-                        .stroke(
-                            Color.brandPrimary,
-                            style: StrokeStyle(lineWidth: 4, lineCap: .round)
-                        )
-                        .frame(width: 72, height: 72)
-                        .rotationEffect(.degrees(-90))
-                        .animation(.linear(duration: 1), value: countdown)
-
-                    // Countdown number
-                    Text("\(countdown)")
-                        .font(EventTypography.bigNumber)
-                        .foregroundStyle(Color.brandPrimary)
-                        .contentTransition(.numericText())
-                        .animation(EventAnimation.snappy, value: countdown)
-                }
-
-                // Stop button — 56pt red circle with white stop icon
-                Button {
-                    EventHaptics.press()
-                    viewModel.stopRecording()
-                } label: {
-                    Circle()
-                        .fill(Color.red)
-                        .frame(width: 56, height: 56)
-                        .overlay(
-                            Image(systemName: "stop.fill")
-                                .font(.system(size: 20, weight: .bold))
-                                .foregroundColor(.white)
-                        )
-                        .shadow(color: .red.opacity(0.35), radius: 12, x: 0, y: 4)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Stop recording")
-                .frame(minWidth: EventSpacing.touchTarget, minHeight: EventSpacing.touchTarget)
-            }
-
-            // Auto-stop hint
-            if viewModel.silenceCountdown != nil {
-                Text("Auto-stopping…")
-                    .font(EventTypography.caption)
-                    .foregroundStyle(textTertiary)
-                    .transition(.opacity.combined(with: .scale(scale: 0.9)))
-            } else {
-                // Invisible placeholder to maintain layout
-                Color.clear
-                    .frame(height: 16)
-            }
-        }
-        .animation(EventAnimation.gentle, value: viewModel.silenceCountdown)
-    }
-
-    // MARK: - Processing
-
-    private var processingView: some View {
-        VStack(spacing: EventSpacing.lg) {
-            IndeterminateProgressBar()
-                .padding(.horizontal, 60)
-
-            HStack(spacing: EventSpacing.sm) {
-                ProgressView()
-                    .scaleEffect(0.8)
-                    .progressViewStyle(CircularProgressViewStyle(tint: textSecondary))
-
-                Text("Processing…")
-                    .font(EventTypography.callout)
-                    .foregroundStyle(textSecondary)
-            }
-        }
-    }
-
-    // MARK: - Start Prompt
-
-    private var startPrompt: some View {
-        VStack(spacing: EventSpacing.xl) {
-            // Icon
-            Image(systemName: "waveform")
-                .font(.system(size: 44, weight: .medium))
-                .foregroundStyle(Color.brandPrimary)
-                .symbolEffect(.pulse, options: .repeating)
-
-            // Title
-            Text("Describe your event")
-                .font(EventTypography.sectionTitle)
-                .foregroundStyle(textPrimary)
-
-            // Subtitle
-            Text("Say something like\n\"Lunch with Sarah next Tuesday at 1pm\"")
-                .font(EventTypography.subheadline)
-                .foregroundStyle(textTertiary)
-                .multilineTextAlignment(.center)
-                .lineSpacing(4)
-                .padding(.horizontal, EventSpacing.huge)
-
-            Button {
-                EventHaptics.press()
-                startRecording()
-            } label: {
-                HStack(spacing: EventSpacing.sm) {
-                    Image(systemName: "mic.fill")
-                        .font(.system(size: 18, weight: .semibold))
-                    Text("Tap to Speak")
-                        .font(EventTypography.bodyMedium)
-                }
-            }
-            .buttonStyle(PrimaryButtonStyle())
-            .padding(.horizontal, EventSpacing.xxl)
-
-            if let error = viewModel.recordingError {
-                Text(error)
-                    .font(EventTypography.footnote)
-                    .foregroundStyle(Color.semanticError)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, EventSpacing.xl)
-            }
+    private func animateIdleWaveform() {
+        withAnimation(EventAnimation.idleWaveform) {
+            idlePhase = .pi * 2
         }
     }
 
@@ -371,8 +372,8 @@ struct VoiceInputView: View {
     private func startRecording() {
         guard !viewModel.isRecording && !viewModel.isProcessing else { return }
 
+        EventHaptics.soft()
         viewModel.startRecording { transcription in
-            // Transcription complete — forward to coordinator
             EventHaptics.success()
             onTranscriptionComplete?(transcription)
         }
@@ -380,10 +381,8 @@ struct VoiceInputView: View {
 }
 
 #if DEBUG
-struct VoiceInputView_Previews: PreviewProvider {
-    static var previews: some View {
-        VoiceInputView()
-            .environment(VoiceViewModel(speechService: SpeechService()))
-    }
+#Preview {
+    VoiceInputView()
+        .environment(VoiceViewModel(speechService: SpeechService()))
 }
 #endif

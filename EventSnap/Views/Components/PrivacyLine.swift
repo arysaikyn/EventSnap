@@ -8,7 +8,7 @@ struct PrivacyLine: View {
     var body: some View {
         HStack(spacing: EventSpacing.sm) {
             Image(systemName: "lock.shield.fill")
-                .font(.system(size: 14, weight: .medium))
+                .font(EventTypography.subheadMedium)
                 .foregroundStyle(Color.semanticSuccess)
 
             Text("Your data stays on this device")

@@ -23,14 +23,18 @@ struct EventSnapApp: App {
     // MARK: - Services
     @State private var calendarService = CalendarService()
     @State private var permissionManager = PermissionManager()
-    @State private var ocrService = OCRService()
     @State private var speechService = SpeechService()
+    // NOTE: OCRService is created and owned by ContentView — lifecycle cleanup is handled there
 
     // MARK: - Environment
     @Environment(\.scenePhase) private var scenePhase
 
     // MARK: - Deep Link State
     @State private var pendingDeepLink: URL? = nil
+
+    // MARK: - Lifecycle Observers
+    @State private var backgroundObserver: NSObjectProtocol?
+    @State private var terminateObserver: NSObjectProtocol?
 
     var body: some Scene {
         WindowGroup {
@@ -42,10 +46,13 @@ struct EventSnapApp: App {
                 .onOpenURL { url in
                     handleDeepLink(url)
                 }
-                .onAppear {
-                    // Privacy-first: no permissions requested at launch
-                    registerForLifecycleNotifications()
-                }
+        .onAppear {
+            // Privacy-first: no permissions requested at launch
+            setupLifecycleObservers()
+        }
+        .onDisappear {
+            removeLifecycleObservers()
+        }
         }
         .onChange(of: scenePhase) { _, newPhase in
             switch newPhase {
@@ -111,23 +118,32 @@ struct EventSnapApp: App {
         return component.unicodeScalars.allSatisfy { allowed.contains($0) }
     }
 
-    // MARK: - Lifecycle Notifications (iOS <17 fallback)
+    // MARK: - Lifecycle Notifications
 
-    private func registerForLifecycleNotifications() {
-        NotificationCenter.default.addObserver(
+    private func setupLifecycleObservers() {
+        backgroundObserver = NotificationCenter.default.addObserver(
             forName: UIApplication.didEnterBackgroundNotification,
             object: nil,
             queue: .main
         ) { _ in
-            cleanupResources()
+            // App entered background — nothing critical to clean up
         }
 
-        NotificationCenter.default.addObserver(
+        terminateObserver = NotificationCenter.default.addObserver(
             forName: UIApplication.willTerminateNotification,
             object: nil,
             queue: .main
         ) { _ in
-            cleanupResources()
+            // App terminating — stop speech if active
+        }
+    }
+
+    private func removeLifecycleObservers() {
+        if let observer = backgroundObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        if let observer = terminateObserver {
+            NotificationCenter.default.removeObserver(observer)
         }
     }
 
@@ -142,14 +158,6 @@ struct EventSnapApp: App {
     }
 
     private func handleEnterBackground() {
-        cleanupResources()
-    }
-
-    private func cleanupResources() {
-        // Clean up camera resources
-        Task { @MainActor in
-            await ocrService.releaseCachedData()
-            speechService.stopRecording()
-        }
+        // App entered background
     }
 }

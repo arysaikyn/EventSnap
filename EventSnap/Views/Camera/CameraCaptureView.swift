@@ -1,66 +1,123 @@
 import SwiftUI
 import AVFoundation
+import UniformTypeIdentifiers
+#if canImport(UIKit)
+import UIKit
+#endif
 
-/// The HOME screen. Full-bleed camera viewfinder with capture button,
-/// on-device badge, flash toggle, and scanning overlay.
-/// Premium design: typography-first, spring animations, glass materials.
+/// The HOME screen. Full-bleed camera viewfinder with viewfinder brackets,
+/// scanning beam, reactive capture button, and alternate image sources.
+/// Design v3: Illuminated Scanner — light-reactive surfaces, spatial depth.
 struct CameraCaptureView: View {
     @Environment(CameraViewModel.self) private var viewModel
     @Environment(PermissionManager.self) private var permissionManager
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.scenePhase) private var scenePhase
 
     @State private var isLongPressing = false
     @State private var multiPageCount = 0
     @State private var showPermissionDenied = false
     @State private var captureButtonScale: CGFloat = 1.0
-    @State private var pulseReadinessRing = false
+    @State private var showCaptureFlash = false
+
+    // MARK: - Alternate Image Source State
+
+    @State private var showPhotoPicker = false
+    @State private var hasClipboardImage = false
 
     /// Called when the user captures a photo and confirms they want to proceed.
     var onImageCaptured: ((UIImage) -> Void)?
 
+    // Computed scan state colors
+    private var bracketColor: Color {
+        switch viewModel.scanReadiness {
+        case .eventReady: return .scanSuccess
+        case .textDetected, .needsMoreDetail, .processing: return .scanPartial
+        case .noText, .looking, .idle: return .white.opacity(0.7)
+        case .error(_): return .scanError
+        }
+    }
+
+    private var isScanningActive: Bool {
+        if case .error = viewModel.scanReadiness { return false }
+        return !viewModel.isProcessing
+    }
+
     var body: some View {
         ZStack {
-            // ── Full-bleed camera feed ──
-            cameraPreviewLayer
-                .ignoresSafeArea(edges: .top)
+            // ── Camera feed or permission denied ──
+            if showPermissionDenied {
+                ZStack {
+                    EventMeshGradient.scannerBackground()
+                    PermissionOverlay(
+                        title: "Camera Access Needed",
+                        message: "EventSnap needs camera access to scan event flyers, posters, and invitations.",
+                        iconName: "camera.fill"
+                    )
+                }
+                .ignoresSafeArea()
+            } else {
+                cameraPreviewLayer
+                    .ignoresSafeArea()
+            }
 
-            // ── Capture overlay UI ──
+            // ── Bottom UI overlay ──
             VStack(spacing: 0) {
-                topBar
-                    .padding(.top, safeAreaTop + EventSpacing.sm)
+                if !showPermissionDenied {
+                    topBar
+                        .padding(.top, safeAreaTop)
+                } else {
+                    Spacer()
+                }
 
                 Spacer()
 
-                scanReadinessCard
-                    .padding(.horizontal, EventSpacing.pageMargin)
-                    .padding(.bottom, EventSpacing.md)
+                if !showPermissionDenied {
+                    scanningOverlay
+                        .padding(.horizontal, EventSpacing.xxl)
+                        .padding(.bottom, EventSpacing.lg)
+                } else {
+                    alternateSourceCallout
+                        .padding(.horizontal, EventSpacing.pageMargin)
+                        .padding(.bottom, EventSpacing.lg)
+                }
 
-                scanningOverlay
-                    .padding(.horizontal, EventSpacing.xl)
-                    .padding(.bottom, EventSpacing.lg)
+                // Image source gallery
+                ImageSourceGallery(
+                    showPhotoPicker: $showPhotoPicker,
+                    hasClipboardImage: hasClipboardImage,
+                    onPasteImage: {
+                        if let image = UIPasteboard.general.images?.first {
+                            onImageCaptured?(validateAndPrepareImage(image))
+                        }
+                    }
+                )
+                .padding(.horizontal, EventSpacing.pageMargin)
+                .padding(.bottom, EventSpacing.md)
 
-                captureButton
-                    .padding(.bottom, EventSpacing.massive)
+                // Capture button
+                if !showPermissionDenied {
+                    captureButtonSection
+                        .padding(.bottom, EventSpacing.xxl)
+                } else {
+                    Spacer().frame(height: EventSpacing.xxl)
+                }
             }
 
-            // ── Permission denied overlay ──
-            if showPermissionDenied {
-                PermissionOverlay(
-                    title: "Camera Access Needed",
-                    message: "EventSnap needs camera access to scan event flyers, posters, and invitations.",
-                    iconName: "camera.fill"
-                )
-                .transition(.opacity)
-                .zIndex(10)
+            // ── Capture flash overlay ──
+            if showCaptureFlash {
+                Color.white
+                    .opacity(0.8)
+                    .transition(.opacity)
+                    .ignoresSafeArea()
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.black)
-        .ignoresSafeArea(edges: .bottom)
+        .background(Color.black.ignoresSafeArea())
         .onAppear {
             checkAndRequestPermissions()
             viewModel.startLiveScanning()
-            pulseReadinessRing = true
+            checkClipboardForImage()
         }
         .onDisappear {
             viewModel.stopLiveScanning()
@@ -68,8 +125,34 @@ struct CameraCaptureView: View {
                 viewModel.stopSession()
             }
         }
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .active { checkClipboardForImage() }
+        }
+        .sheet(isPresented: $showPhotoPicker) {
+            PhotoPickerView(onImageSelected: { image in
+                onImageCaptured?(validateAndPrepareImage(image))
+            })
+        }
+        .onDrop(of: [.image], isTargeted: nil) { providers in
+            guard let provider = providers.first else { return false }
+            provider.loadObject(ofClass: UIImage.self) { result, _ in
+                guard let image = result as? UIImage else { return }
+                Task { @MainActor in
+                    onImageCaptured?(validateAndPrepareImage(image))
+                }
+            }
+            return true
+        }
         .animation(EventAnimation.default_, value: viewModel.isProcessing)
         .animation(EventAnimation.gentle, value: viewModel.scanReadiness)
+        .overlay(alignment: .bottom) {
+            // Minimal status pill — only show when camera is truly unavailable
+            if case .error(let message) = viewModel.scanReadiness {
+                statusPill(title: "Camera unavailable", message: message)
+                    .padding(.bottom, EventSpacing.lg)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
         .animation(EventAnimation.gentle, value: showPermissionDenied)
     }
 
@@ -77,26 +160,19 @@ struct CameraCaptureView: View {
 
     private var topBar: some View {
         HStack(alignment: .center, spacing: EventSpacing.sm) {
-            OnDeviceBadge()
-
             Spacer()
 
             if viewModel.isProcessing || viewModel.scanReadiness == .eventReady {
-                // Multi-page counter badge
                 if multiPageCount > 1 {
                     Text("\(multiPageCount)")
                         .font(EventTypography.footnoteSemibold)
                         .foregroundStyle(.white)
                         .frame(minWidth: EventSpacing.touchTarget, minHeight: EventSpacing.touchTarget)
-                        .background(
-                            Capsule()
-                                .fill(Color.brandPrimary)
-                        )
+                        .background(Capsule().fill(Color.brandPrimary))
                         .padding(.trailing, EventSpacing.xs)
                         .transition(.scale.combined(with: .opacity))
                 }
 
-                // Flash toggle
                 Button {
                     EventHaptics.tap()
                     viewModel.toggleFlash()
@@ -105,18 +181,12 @@ struct CameraCaptureView: View {
                         .font(EventTypography.iconTitle)
                         .foregroundStyle(viewModel.isFlashOn ? Color.brandAccent : .white)
                         .frame(width: EventSpacing.touchTarget, height: EventSpacing.touchTarget)
-                        .background(
-                            Circle()
-                                .fill(.black.opacity(0.25))
-                        )
+                        .background(Circle().fill(.black.opacity(0.25)))
                         .overlay(
-                            Circle()
-                                .stroke(
-                                    viewModel.isFlashOn
-                                        ? Color.brandAccent.opacity(0.4)
-                                        : .white.opacity(0.15),
-                                    lineWidth: 1
-                                )
+                            Circle().stroke(
+                                viewModel.isFlashOn ? Color.brandAccent.opacity(0.4) : .white.opacity(0.15),
+                                lineWidth: 1
+                            )
                         )
                 }
                 .buttonStyle(.plain)
@@ -126,37 +196,86 @@ struct CameraCaptureView: View {
             }
         }
         .padding(.leading, EventSpacing.pageMargin)
+        .padding(.horizontal, EventSpacing.pageMargin)
+        .padding(.vertical, EventSpacing.md)
+        .background(
+            LinearGradient(
+                colors: [.black.opacity(0.3), .black.opacity(0)],
+                startPoint: .top, endPoint: .bottom
+            )
+        )
     }
 
-    // MARK: - Camera Preview
+    // MARK: - Camera Preview with Viewfinder Brackets
 
     private var cameraPreviewLayer: some View {
         CameraPreview(session: viewModel.captureSession)
             .overlay(
-                viewModel.isProcessing
-                    ? Color.black.opacity(0.30)
-                    : Color.clear
+                viewModel.isProcessing ? Color.black.opacity(0.30) : Color.clear
             )
-            .overlay(alignment: .center) {
-                RoundedRectangle(cornerRadius: EventRadius.xl)
-                    .stroke(
-                        viewModel.scanReadiness.tintColor.opacity(pulseReadinessRing ? 0.95 : 0.45),
-                        lineWidth: 3
-                    )
-                    .padding(EventSpacing.pageMargin)
-                    .animation(
-                        .easeInOut(duration: 1.0).repeatForever(autoreverses: true),
-                        value: pulseReadinessRing
-                    )
+            // Viewfinder brackets
+            .overlay {
+                ViewfinderBrackets(
+                    tintColor: bracketColor,
+                    lineWidth: viewModel.scanReadiness == .eventReady ? 3.5 : 2.5,
+                    cornerRadius: 10
+                )
+                .animation(EventAnimation.default_, value: viewModel.scanReadiness)
+            }
+            // Scanning beam
+            .overlay {
+                if isScanningActive {
+                    ScanningBeam(isActive: true, beamColor: bracketColor)
+                        .padding(EventSpacing.viewfinderInset + 4)
+                }
+            }
+            // Ready glow pulse
+            .overlay {
+                if viewModel.scanReadiness == .eventReady {
+                    RoundedRectangle(cornerRadius: EventRadius.xl, style: .continuous)
+                        .stroke(bracketColor.opacity(0.5), lineWidth: 2)
+                        .padding(EventSpacing.viewfinderInset - 4)
+                        .transition(.opacity)
+                }
             }
     }
+
+    // MARK: - Status Pill (Error Only)
+
+    private func statusPill(title: String, message: String) -> some View {
+        HStack(spacing: EventSpacing.sm) {
+            Circle()
+                .fill(.red)
+                .frame(width: 8, height: 8)
+                .shadow(color: .red.opacity(0.5), radius: 6)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(EventTypography.footnoteSemibold)
+                    .foregroundStyle(.white)
+                Text(message)
+                    .font(EventTypography.caption2)
+                    .foregroundStyle(.white.opacity(0.7))
+            }
+            Spacer()
+        }
+        .padding(.horizontal, EventSpacing.md)
+        .padding(.vertical, EventSpacing.sm)
+        .background(
+            Capsule()
+                .fill(.black.opacity(0.6))
+        )
+        .padding(.horizontal, EventSpacing.pageMargin)
+    }
+
+    // MARK: - Scan Readiness Card
 
     private var scanReadinessCard: some View {
         HStack(spacing: EventSpacing.sm) {
             Circle()
-                .fill(viewModel.scanReadiness.tintColor)
+                .fill(bracketColor)
                 .frame(width: 10, height: 10)
-                .shadow(color: viewModel.scanReadiness.tintColor.opacity(0.7), radius: 8)
+                .shadow(color: bracketColor.opacity(0.7), radius: 8)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(viewModel.scanReadiness.message)
@@ -165,8 +284,8 @@ struct CameraCaptureView: View {
 
                 if let title = viewModel.detectedEventTitle, viewModel.scanReadiness == .eventReady {
                     Text(title)
-                        .font(EventTypography.caption)
-                        .foregroundStyle(.white.opacity(0.72))
+                        .font(EventTypography.bodyMedium)
+                        .foregroundStyle(.white.opacity(0.85))
                         .lineLimit(1)
                 } else if viewModel.scanReadiness == .needsMoreDetail {
                     Text("Make sure the event date, time, and title are visible.")
@@ -185,10 +304,14 @@ struct CameraCaptureView: View {
         }
         .padding(.horizontal, EventSpacing.md)
         .padding(.vertical, EventSpacing.sm)
-        .background(.black.opacity(0.42), in: Capsule())
+        .background {
+            EventGlass.pill {
+                Capsule().fill(.black.opacity(0.35))
+            }
+        }
         .overlay(
             Capsule()
-                .stroke(viewModel.scanReadiness.tintColor.opacity(0.35), lineWidth: 1)
+                .stroke(bracketColor.opacity(0.35), lineWidth: 1)
         )
     }
 
@@ -200,39 +323,28 @@ struct CameraCaptureView: View {
             VStack(spacing: EventSpacing.lg) {
                 // Scanning header
                 HStack(spacing: EventSpacing.sm) {
-                    Image(systemName: "viewfinder")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(viewModel.scanReadiness.tintColor)
+                    Image(systemName: viewModel.scanReadiness == .eventReady ? "checkmark.circle.fill" : "viewfinder")
+                        .font(EventTypography.subheadSemibold)
+                        .foregroundStyle(bracketColor)
                     Text(viewModel.scanReadiness == .eventReady ? "Ready to review" : "Scanning...")
                         .font(EventTypography.subheadSemibold)
-                        .foregroundStyle(
-                            colorScheme == .dark
-                                ? Color.textPrimaryDark
-                                : Color.textPrimary
-                        )
+                        .foregroundStyle(colorScheme == .dark ? Color.textPrimaryDark : Color.textPrimary)
                 }
 
                 if viewModel.isProcessing {
-                    // Shimmer progress bar
                     shimmerProgressBar
                         .padding(.horizontal, EventSpacing.xs)
                 }
 
-                // OCR text preview
                 if !viewModel.extractedTextPreview.isEmpty {
                     VStack(spacing: EventSpacing.md) {
                         Text(viewModel.extractedTextPreview)
                             .font(EventTypography.callout)
-                            .foregroundStyle(
-                                colorScheme == .dark
-                                    ? Color.textSecondaryDark
-                                    : Color.textSecondary
-                            )
+                            .foregroundStyle(colorScheme == .dark ? Color.textSecondaryDark : Color.textSecondary)
                             .lineLimit(3)
                             .multilineTextAlignment(.center)
                             .fixedSize(horizontal: false, vertical: true)
 
-                        // Continue button
                         Button {
                             EventHaptics.press()
                             if let capturedImage = viewModel.capturedImage {
@@ -246,18 +358,11 @@ struct CameraCaptureView: View {
                         .frame(maxWidth: 260)
                         .accessibilityLabel("Continue to event preview")
                     }
-                    .transition(
-                        .opacity.combined(with: .move(edge: .bottom))
-                    )
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
                 }
             }
-            .padding(EventSpacing.xl)
-            .background(.ultraThinMaterial)
-            .clipShape(RoundedRectangle(cornerRadius: EventSpacing.cardCornerRadius))
-            .shadow(color: .black.opacity(0.12), radius: 16, x: 0, y: 6)
-            .transition(
-                .opacity.combined(with: .scale(scale: 0.95))
-            )
+            .glassCard()
+            .transition(.opacity.combined(with: .scale(scale: 0.95)))
         }
     }
 
@@ -266,158 +371,143 @@ struct CameraCaptureView: View {
     private var shimmerProgressBar: some View {
         GeometryReader { geometry in
             ZStack(alignment: .leading) {
-                // Track
                 RoundedRectangle(cornerRadius: 4)
-                    .fill(
-                        colorScheme == .dark
-                            ? Color.surfaceSubtleDark.opacity(0.5)
-                            : Color.surfaceSubtle.opacity(0.5)
-                    )
+                    .fill(colorScheme == .dark ? Color.surfaceSubtleDark.opacity(0.5) : Color.surfaceSubtle.opacity(0.5))
                     .frame(height: 6)
 
-                // Animated shimmer fill
                 RoundedRectangle(cornerRadius: 4)
                     .fill(
                         LinearGradient(
-                            colors: [
-                                Color.brandPrimary.opacity(0.6),
-                                Color.brandPrimary,
-                                Color.brandPrimary.opacity(0.6)
-                            ],
-                            startPoint: .leading,
-                            endPoint: .trailing
+                            colors: [.brandPrimary.opacity(0.6), .brandPrimary, .brandPrimary.opacity(0.6)],
+                            startPoint: .leading, endPoint: .trailing
                         )
                     )
                     .frame(height: 6)
-                    .frame(
-                        width: geometry.size.width * 0.4
-                    )
+                    .frame(width: geometry.size.width * 0.4)
                     .offset(x: shimmerOffset * geometry.size.width * 0.6)
-                    .animation(
-                        Animation.linear(duration: 1.2).repeatForever(autoreverses: false),
-                        value: shimmerOffset
-                    )
+                    .animation(EventAnimation.shimmer, value: shimmerOffset)
             }
         }
         .frame(height: 6)
-        .onAppear {
-            shimmerOffset = 1.0
-        }
+        .onAppear { shimmerOffset = 1.0 }
     }
 
     @State private var shimmerOffset: CGFloat = -0.5
 
-    // MARK: - Capture Button
+    // MARK: - Capture Button Section
 
-    private var captureButton: some View {
-        Button {
-            capturePhoto()
-        } label: {
-            ZStack {
-                // Outer glow ring
-                Circle()
-                    .stroke(
-                        LinearGradient(
-                            colors: [
-                                .white.opacity(0.6),
-                                .white.opacity(0.2)
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ),
-                        lineWidth: 4
-                    )
-                    .frame(width: 76, height: 76)
-
-                // Inner solid ring
-                Circle()
-                    .fill(.white)
-                    .frame(width: 66, height: 66)
-
-                // Innermost accent dot
-                Circle()
-                    .fill(Color.brandPrimary)
-                    .frame(width: 58, height: 58)
-                    .overlay(
-                        Circle()
-                            .stroke(
-                                Color.brandPrimary.opacity(0.3),
-                                lineWidth: 1
-                            )
-                    )
-            }
-            .scaleEffect(captureButtonScale)
-        }
-        .buttonStyle(.plain)
-        .disabled(viewModel.isProcessing)
-        .opacity(viewModel.isProcessing ? 0.55 : 1.0)
-        .simultaneousGesture(
-            LongPressGesture(minimumDuration: 0.5)
-                .onEnded { _ in
-                    EventHaptics.heavy()
-                    isLongPressing = true
-                    multiPageCount += 1
-                    capturePhoto()
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                        isLongPressing = false
-                    }
-                }
+    private var captureButtonSection: some View {
+        CaptureButton(
+            action: capturePhoto,
+            isReady: viewModel.scanReadiness == .eventReady,
+            isDisabled: viewModel.isProcessing,
+            scale: captureButtonScale
         )
-        .onLongPressGesture(
-            minimumDuration: 0,
-            maximumDistance: 60
-        ) {} onPressingChanged: { pressing in
+        .onLongPressGesture(minimumDuration: 0, maximumDistance: 60) { pressing in
             withAnimation(EventAnimation.snappy) {
                 captureButtonScale = pressing ? 0.88 : 1.0
             }
+        } perform: {
+            EventHaptics.heavy()
+            multiPageCount += 1
+            capturePhoto()
         }
-        .accessibilityLabel("Capture event")
-        .accessibilityHint("Double-tap to capture. Long-press for multi-page scanning.")
+    }
+
+    // MARK: - Alt Source Callout (Permission Denied)
+
+    private var alternateSourceCallout: some View {
+        VStack(spacing: EventSpacing.md) {
+            VStack(spacing: EventSpacing.sm) {
+                Image(systemName: "photo.on.rectangle.angled")
+                    .font(EventTypography.sectionTitle)
+                    .foregroundStyle(Color.brandAccent)
+
+                Text("Import from another source")
+                    .font(EventTypography.subheadSemibold)
+                    .foregroundStyle(.white)
+
+                Text("Choose an image from Photos, paste from clipboard, or drag & drop.")
+                    .font(EventTypography.caption)
+                    .foregroundStyle(.white.opacity(0.7))
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.horizontal, EventSpacing.lg)
+            .padding(.vertical, EventSpacing.md)
+            .background(.ultraThinMaterial.opacity(0.3), in: RoundedRectangle(cornerRadius: EventRadius.large))
+            .overlay(
+                RoundedRectangle(cornerRadius: EventRadius.large)
+                    .stroke(Color.brandAccent.opacity(0.2), lineWidth: 1)
+            )
+        }
     }
 
     // MARK: - Actions
 
     private func capturePhoto() {
-        EventHaptics.press()
+        // Flash animation
+        withAnimation(.easeOut(duration: 0.15)) {
+            showCaptureFlash = true
+        }
+        EventHaptics.captureSequence()
 
         Task {
             viewModel.clearScanResult()
             guard let image = await viewModel.capturePhoto() else { return }
 
-            EventHaptics.success()
+            withAnimation(.easeOut(duration: 0.4)) {
+                showCaptureFlash = false
+            }
             onImageCaptured?(image)
         }
     }
 
     private func checkAndRequestPermissions() {
-        Task {
-            let status = AVCaptureDevice.authorizationStatus(for: .video)
-            switch status {
-            case .notDetermined:
+        let status = permissionManager.cameraStatus
+        switch status {
+        case .notDetermined:
+            Task {
                 let granted = await permissionManager.requestCameraAccess()
                 if granted {
                     viewModel.startSession()
                 } else {
-                    withAnimation(EventAnimation.gentle) {
-                        showPermissionDenied = true
+                    await MainActor.run {
+                        withAnimation(EventAnimation.gentle) { showPermissionDenied = true }
                     }
                 }
-            case .authorized:
-                viewModel.startSession()
-            case .denied, .restricted:
-                withAnimation(EventAnimation.gentle) {
-                    showPermissionDenied = true
-                }
-            @unknown default:
-                showPermissionDenied = true
             }
+        case .authorized:
+            viewModel.startSession()
+        case .denied, .restricted:
+            withAnimation(EventAnimation.gentle) { showPermissionDenied = true }
+        @unknown default:
+            showPermissionDenied = true
+        }
+    }
+
+    private func checkClipboardForImage() {
+        hasClipboardImage = UIPasteboard.general.hasImages
+    }
+
+    // MARK: - Image Validation
+
+    private static let maxImagePixels: Int64 = 25 * 1024 * 1024
+
+    private func validateAndPrepareImage(_ image: UIImage) -> UIImage {
+        let pixelCount = Int64(image.size.width * image.size.height * image.scale * image.scale)
+        guard pixelCount > Self.maxImagePixels else { return image }
+
+        let scaleFactor = sqrt(Double(Self.maxImagePixels) / Double(pixelCount))
+        let targetSize = CGSize(width: image.size.width * scaleFactor, height: image.size.height * scaleFactor)
+
+        let renderer = UIGraphicsImageRenderer(size: targetSize)
+        return renderer.image { _ in
+            image.draw(in: CGRect(origin: .zero, size: targetSize))
         }
     }
 
     private var safeAreaTop: CGFloat {
-        // NOTE: Using UIApplication.shared.connectedScenes here is a known approach.
-        // This should be replaced with safeAreaInset or GeometryReader in a future refactor
-        // for better SwiftUI integration, but it works correctly for now.
         if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
            let window = windowScene.windows.first {
             return window.safeAreaInsets.top
@@ -447,6 +537,8 @@ struct CameraPreview: UIViewRepresentable {
         override class var layerClass: AnyClass { AVCaptureVideoPreviewLayer.self }
 
         var previewLayer: AVCaptureVideoPreviewLayer {
+            // Safe: layerClass override guarantees this type at runtime
+            // swiftlint:disable:next force_cast
             layer as! AVCaptureVideoPreviewLayer
         }
     }

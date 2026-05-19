@@ -9,7 +9,7 @@ struct OnDeviceBadge: View {
     var body: some View {
         HStack(spacing: EventSpacing.sm) {
             Image(systemName: "lock.shield.fill")
-                .font(.system(size: 12, weight: .semibold))
+                .font(EventTypography.captionMedium)
                 .foregroundStyle(Color.semanticSuccess)
 
             Text("On-Device")
@@ -20,14 +20,7 @@ struct OnDeviceBadge: View {
         }
         .padding(.horizontal, EventSpacing.md)
         .padding(.vertical, EventSpacing.sm)
-        .background(
-            Capsule()
-                .fill(colorScheme == .dark ? Color.surfaceSubtleDark.opacity(0.7) : Color.surfaceSubtle.opacity(0.7))
-        )
-        .overlay(
-            Capsule()
-                .stroke(colorScheme == .dark ? Color.borderSubtleDark : Color.borderSubtle, lineWidth: 1)
-        )
+        .background(.ultraThinMaterial, in: Capsule())
     }
 }
 

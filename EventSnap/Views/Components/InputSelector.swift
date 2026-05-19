@@ -20,14 +20,14 @@ struct InputSelector: View {
                 } label: {
                     HStack(spacing: EventSpacing.sm) {
                         Image(systemName: mode.iconName)
-                            .font(.system(size: 16, weight: .medium))
+                            .font(EventTypography.calloutMedium)
 
                         Text(mode.title)
                             .font(EventTypography.captionMedium)
                     }
-                    .foregroundStyle(selectedMode == mode ? .white : Color.textSecondary)
+                    .foregroundStyle(selectedMode == mode ? .white : Color.textTertiary)
                     .frame(maxWidth: .infinity)
-                    .frame(height: 36)
+                    .frame(height: EventSpacing.inputSelectorHeight)
                     .background(
                         ZStack {
                             if selectedMode == mode {
@@ -43,7 +43,7 @@ struct InputSelector: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel("\(mode.title) input mode")
                 .accessibilityAddTraits(selectedMode == mode ? .isSelected : [])
-                .frame(minWidth: EventSpacing.touchTarget, minHeight: 36)
+                .frame(minWidth: EventSpacing.touchTarget, minHeight: EventSpacing.inputSelectorHeight)
             }
         }
         .padding(EventSpacing.xs)

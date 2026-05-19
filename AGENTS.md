@@ -123,6 +123,9 @@
 | Voice flow | Explicit tap-to-speak | No auto-start, user controls when to record |
 | Confetti | 6 particles, 1.5s | Subtle celebration, not assault |
 | Duplicate detection | Non-blocking | Avoid calendar save lag |
+| App icon switching | `CFBundleAlternateIcons` via `setAlternateIconName(_:)` | Uses iOS native alternate icons API — no App Store update needed. 4 alternates registered in Info.plist: Brackets, Monogram, ShieldDot, ShieldLens |
+| Alternate icon assets | `.appiconset` directories with `Contents.json` mapping | Each variant has 12 sizes (20px→1024px). Icon filenames in Contents.json must match actual PNG names |
+| Tab bar material | Removed `.ultraThinMaterial`, use `.thinMaterial` + controlled shadow | Prevents glass bleed artifact into home indicator area |
 
 ---
 
@@ -143,6 +146,7 @@
 | Manually edit `project.pbxproj` | Xcode 26 auto-includes via `PBXFileSystemSynchronizedRootGroup` |
 | Run `tsc` or `npm` commands | This is a Swift/Xcode project, use `xcodebuild` |
 | Run CLI test execution | Xcode beta has Mach -308 issues; test via Xcode UI (Cmd+U) |
+| Change icon filenames in Contents.json | Must match exact PNG filenames in the .appiconset directory |
 
 ---
 
@@ -175,7 +179,8 @@ EventSnap/
 │       ├── OnDeviceBadge.swift   → lock.shield.fill + semanticSuccess capsule
 │       ├── PermissionOverlay.swift → Large icon + brandPrimary "Open Settings"
 │       ├── PrivacyLine.swift     → lock.shield.fill + footnote
-│       └── ProgressBar.swift     → Deterministic fill + shimmer indeterminate
+│       ├── ProgressBar.swift     → Deterministic fill + shimmer indeterminate
+│       └── IconChangerView.swift   → Grid-based icon selector, uses setAlternateIconName(_:)
 ├── Services/
 │   ├── OCRService.swift          → actor, Vision VNRecognizeTextRequest, two-pass (fast+accurate), PII sanitize
 │   ├── CalendarService.swift     → @MainActor, write-only access, non-blocking save, .authorized compat
@@ -231,7 +236,9 @@ EventSnap/
 | 5 | Testing | 5 new test files, 14 total | Build ✅ + Test Build ✅ |
 | 6 | Audit | 3-agent review, 9/10 score, 0 critical/high | Build ✅ |
 | 7 | Handoff | CLAUDE.md + AGENTS.md context files | Build ✅ |
-| 8 | Polish | Camera live scan, voice tap-to-speak, UX fixes | Build ✅ (0 errors) |
+| 9 | App Store Prep + Council | App icon, privacy policy, submission guide, RN migration analysis (2.6/10) | Build ✅ + Council ✅ |
+| 10 | Design System + Research | Image sources (Photos/paste/drop), LubaUI SPM dep, ShipSwift components, glass theme migration, Swift Charts | Build ✅ |
+| 11 | Icon Redesign + Changer | Shield primary icon, 4 alternates, IconChangerView, Info.plist CFBundleIcons | Build ✅ (0 errors, 0 warnings) |
 
 ---
 
@@ -275,13 +282,24 @@ EventSnapApp (@State services)
             └→ Views (.environment(VMs))
 ```
 
+### Icon Switching Flow
+```swift
+// IconChangerView + SettingsView
+if UIApplication.shared.supportsAlternateIcons {
+    try await UIApplication.shared.setAlternateIconName("AppIcon-Brackets") // Switch
+    try await UIApplication.shared.setAlternateIconName(nil) // Revert to primary
+}
+// SettingsView displays current via UIApplication.shared.alternateIconName → displayIconName computed property
+// Display names: "Default" (nil), "Brackets", "Monogram", "Shield Dot", "Shield Lens"
+```
+
 ---
 
 ## Remaining Work Before App Store
 
 | Task | Status | Notes |
 |---|---|---|
-| App icon | ❌ Needed | 1024x1024 master in Assets.xcassets/AppIcon.appiconset |
+| App icon | ✅ Done | Shield (primary) + 4 alternates (Brackets/Monogram/ShieldDot/ShieldLens) with IconChanger in Settings |
 | Privacy policy URL | ❌ Needed | Required for App Store submission; host publicly |
 | Screenshots | ❌ Needed | 6.5" (iPhone 15 Pro Max) + 5.5" (iPhone SE) sizes |
 | App Store Connect | ❌ Needed | Create app entry, upload build, submit for review |

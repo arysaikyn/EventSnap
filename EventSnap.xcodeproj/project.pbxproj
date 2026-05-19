@@ -195,6 +195,8 @@
 			);
 			mainGroup = 7810083D2FB07E7400A02BE6;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 781008472FB07E7400A02BE6 /* Products */;
 			projectDirPath = "";
@@ -311,7 +313,7 @@
 				GCC_C_LANGUAGE_STANDARD = gnu17;
 				GCC_DYNAMIC_NO_PIC = NO;
 				GCC_NO_COMMON_BLOCKS = YES;
-				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_OPTIMIZATION_LEVEL = 1;
 				GCC_PREPROCESSOR_DEFINITIONS = (
 					"DEBUG=1",
 					"$(inherited)",
@@ -327,7 +329,7 @@
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
-				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
 			};
 			name = Debug;
 		};
@@ -398,6 +400,7 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Support/Info.plist;
 				INFOPLIST_KEY_CFBundleURLTypes = "{\n    CFBundleURLName = EventSnap;\n    CFBundleURLSchemes =     (\n        eventsnap\n    );\n}";
 				INFOPLIST_KEY_LSApplicationQueriesSchemes = "calshow itms-apps";
 				INFOPLIST_KEY_NSCalendarsWriteOnlyAccessUsageDescription = "EventSnap only creates new events in your calendar. It cannot read your existing calendar events, keeping your schedule private.";
@@ -449,6 +452,7 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Support/Info.plist;
 				INFOPLIST_KEY_CFBundleURLTypes = "{\n    CFBundleURLName = EventSnap;\n    CFBundleURLSchemes =     (\n        eventsnap\n    );\n}";
 				INFOPLIST_KEY_LSApplicationQueriesSchemes = "calshow itms-apps";
 				INFOPLIST_KEY_NSCalendarsWriteOnlyAccessUsageDescription = "EventSnap only creates new events in your calendar. It cannot read your existing calendar events, keeping your schedule private.";

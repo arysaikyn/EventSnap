@@ -50,81 +50,91 @@ enum NLParser {
         try? NSDataDetector(types: NSTextCheckingResult.CheckingType.date.rawValue)
     }()
 
+    /// Safe regex factory with descriptive error messages.
+    /// Patterns are compile-time constants, so compilation failures indicate
+    /// developer errors that should be caught immediately at startup.
+    private static func regex(_ pattern: String, _ options: NSRegularExpression.Options = []) -> NSRegularExpression {
+        do {
+            return try NSRegularExpression(pattern: pattern, options: options)
+        } catch {
+            fatalError("Invalid NLParser regex pattern: \(pattern)\nError: \(error)")
+        }
+    }
+
     // MARK: - Time Regex Patterns
 
-    // NOTE: All regex patterns are compile-time constants verified at development.
-    // `try!` is acceptable here because pattern errors would be caught during testing.
-    // If a pattern fails to compile at runtime, it indicates a development error.
+    // All regex patterns are compile-time string constants. Compilation failures
+    // are caught immediately at app startup with descriptive error messages.
 
     private static let timePatterns: [NSRegularExpression] = [
         // "at 7pm", "at 7:30pm", "at 7 PM"
-        try! NSRegularExpression(pattern: #"(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm|AM|PM)(?:\b|\.|\s|,|$)"#),
+        regex(#"(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm|AM|PM)(?:\b|\.|\s|,|$)"#),
         // "7:00" (24-hour format)
-        try! NSRegularExpression(pattern: #"\b(\d{1,2}):(\d{2})\b(?!\s*(?:am|pm|AM|PM))"#),
+        regex(#"\b(\d{1,2}):(\d{2})\b(?!\s*(?:am|pm|AM|PM))"#),
         // "noon", "midnight"
-        try! NSRegularExpression(pattern: #"\b(noon|midnight)\b"#),
+        regex(#"\b(noon|midnight)\b"#),
         // "in the morning", "in the afternoon", "in the evening"
-        try! NSRegularExpression(pattern: #"\bin\s+the\s+(morning|afternoon|evening)\b"#),
+        regex(#"\bin\s+the\s+(morning|afternoon|evening)\b"#),
         // "at noon", "at midnight"
-        try! NSRegularExpression(pattern: #"\bat\s+(noon|midnight)\b"#),
+        regex(#"\bat\s+(noon|midnight)\b"#),
     ]
 
     // MARK: - Duration Regex Patterns
 
     private static let durationPatterns: [NSRegularExpression] = [
         // "for 2 hours", "for 1 hour", "for 30 minutes", "for 45 mins"
-        try! NSRegularExpression(pattern: #"for\s+(\d+)\s*(hour|hr|minute|min|h|m)s?\b"#, options: .caseInsensitive),
+        regex(#"for\s+(\d+)\s*(hour|hr|minute|min|h|m)s?\b"#, .caseInsensitive),
         // "2-hour", "3 hour"
-        try! NSRegularExpression(pattern: #"\b(\d+)\s*[-–]\s*hour\b"#, options: .caseInsensitive),
+        regex(#"\b(\d+)\s*[-–]\s*hour\b"#, .caseInsensitive),
         // "from 7pm to 9pm", "from 7-9pm"
-        try! NSRegularExpression(pattern: #"from\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*[-–to]+\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)?"#, options: .caseInsensitive),
+        regex(#"from\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*[-–to]+\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)?"#, .caseInsensitive),
         // "7pm-9pm", "7:00-9:00", "7-9pm"
-        try! NSRegularExpression(pattern: #"\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*[-–]\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)?"#, options: .caseInsensitive),
+        regex(#"\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*[-–]\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)?"#, .caseInsensitive),
     ]
 
     // MARK: - Location Regex Patterns
 
     private static let locationPatterns: [NSRegularExpression] = [
         // 📍 marker
-        try! NSRegularExpression(pattern: #"📍\s*(.+?)(?:$|\.|,|\n)"#),
+        regex(#"📍\s*(.+?)(?:$|\.|,|\n)"#),
         // "at [Place Name]" — only if "at" is not followed by a time
-        try! NSRegularExpression(pattern: #"(?:^|\.|,|\s)\bat\s+([A-Z][A-Za-z0-9\s'&.-]+?)(?:$|\.|,|\n| \(|\s+on|\s+this|\s+next|\s+tomorrow|\s+at\s+)"#),
+        regex(#"(?:^|\.|,|\s)\bat\s+([A-Z][A-Za-z0-9\s'&.-]+?)(?:$|\.|,|\n| \(|\s+on|\s+this|\s+next|\s+tomorrow|\s+at\s+)"#),
         // "in [Place Name]" 
-        try! NSRegularExpression(pattern: #"(?:^|\.|,|\s)\bin\s+the\s+([A-Z][A-Za-z0-9\s'&.-]+?)(?:$|\.|,|\n)"#),
+        regex(#"(?:^|\.|,|\s)\bin\s+the\s+([A-Z][A-Za-z0-9\s'&.-]+?)(?:$|\.|,|\n)"#),
         // Address patterns (starts with a number)
-        try! NSRegularExpression(pattern: #"\b(\d+\s+[A-Za-z0-9\s.'-]+(?:Street|St|Avenue|Ave|Road|Rd|Boulevard|Blvd|Lane|Ln|Drive|Dr|Court|Ct|Place|Pl|Way|Square|Sq|Highway|Hwy|Suite|Ste|Floor|Fl)\b[^,\.\n]*)"#, options: .caseInsensitive),
+        regex(#"\b(\d+\s+[A-Za-z0-9\s.'-]+(?:Street|St|Avenue|Ave|Road|Rd|Boulevard|Blvd|Lane|Ln|Drive|Dr|Court|Ct|Place|Pl|Way|Square|Sq|Highway|Hwy|Suite|Ste|Floor|Fl)\b[^,\.\n]*)"#, .caseInsensitive),
         // "@ [Place]" (social media style)
-        try! NSRegularExpression(pattern: #"@\s*([A-Za-z0-9\s'&.-]+?)(?:$|\.|,|\n)"#),
+        regex(#"@\s*([A-Za-z0-9\s'&.-]+?)(?:$|\.|,|\n)"#),
     ]
 
     // MARK: - Recurrence Regex Patterns
 
     private static let recurrencePatterns: [NSRegularExpression] = [
         // "every day", "every week", "every month", "every year"
-        try! NSRegularExpression(pattern: #"every\s+(day|week|month|year|monday|tuesday|wednesday|thursday|friday|saturday|sunday|mon|tue|wed|thu|fri|sat|sun)\b"#, options: .caseInsensitive),
+        regex(#"every\s+(day|week|month|year|monday|tuesday|wednesday|thursday|friday|saturday|sunday|mon|tue|wed|thu|fri|sat|sun)\b"#, .caseInsensitive),
         // "daily", "weekly", "monthly", "yearly"
-        try! NSRegularExpression(pattern: #"\b(daily|weekly|monthly|yearly|biweekly|semimonthly)\b"#, options: .caseInsensitive),
+        regex(#"\b(daily|weekly|monthly|yearly|biweekly|semimonthly)\b"#, .caseInsensitive),
         // "every other day/week/month"
-        try! NSRegularExpression(pattern: #"every\s+other\s+(day|week|month|year)\b"#, options: .caseInsensitive),
+        regex(#"every\s+other\s+(day|week|month|year)\b"#, .caseInsensitive),
         // "each Monday", "each Tuesday", etc.
-        try! NSRegularExpression(pattern: #"each\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b"#, options: .caseInsensitive),
+        regex(#"each\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b"#, .caseInsensitive),
         // "weekdays", "weekends"
-        try! NSRegularExpression(pattern: #"\b(weekdays?|weekends?)\b"#, options: .caseInsensitive),
+        regex(#"\b(weekdays?|weekends?)\b"#, .caseInsensitive),
     ]
 
     // MARK: - Relative Date Predicates
 
     private static let relativeDatePatterns: [NSRegularExpression] = [
         // "today", "tonight"
-        try! NSRegularExpression(pattern: #"\b(today|tonight)\b"#, options: .caseInsensitive),
+        regex(#"\b(today|tonight)\b"#, .caseInsensitive),
         // "tomorrow"
-        try! NSRegularExpression(pattern: #"\b(tomorrow)\b"#, options: .caseInsensitive),
+        regex(#"\b(tomorrow)\b"#, .caseInsensitive),
         // "in X days/weeks"
-        try! NSRegularExpression(pattern: #"\bin\s+(\d+)\s+(day|days|week|weeks)\b"#, options: .caseInsensitive),
+        regex(#"\bin\s+(\d+)\s+(day|days|week|weeks)\b"#, .caseInsensitive),
         // "next week", "next month"
-        try! NSRegularExpression(pattern: #"\bnext\s+(week|month|year)\b"#, options: .caseInsensitive),
+        regex(#"\bnext\s+(week|month|year)\b"#, .caseInsensitive),
         // "this week", "this month"
-        try! NSRegularExpression(pattern: #"\bthis\s+(week|month|year)\b"#, options: .caseInsensitive),
+        regex(#"\bthis\s+(week|month|year)\b"#, .caseInsensitive),
     ]
 
     // MARK: - Public Parse Method

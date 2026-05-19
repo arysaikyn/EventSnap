@@ -1,63 +1,79 @@
 import SwiftUI
-import UIKit
 import SwiftData
 
-/// Success/confirmation screen shown after an event is added to the calendar.
-/// Features expanding success ring, checkmark animation, confetti burst, and auto-dismiss.
-/// Premium design with spring overshoot animations.
+/// Success screen after calendar save.
+/// Orchestrated entry: ring pulse → AnimatedCheckmark → scale-in card → ConfettiBurst → auto-dismiss.
 struct EventConfirmationView: View {
     @Environment(EventCreationViewModel.self) private var viewModel
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
 
     @State private var ringScale: CGFloat = 0.0
-    @State private var ringOuterScale: CGFloat = 0.0
-    @State private var checkmarkProgress: CGFloat = 0.0
+    @State private var checkmarkAppeared = false
     @State private var showContent = false
     @State private var confettiActive = false
     @State private var autoDismissTask: Task<Void, Never>?
-    @State private var interactionTimer: Task<Void, Never>?
 
     private let autoDismissDelay: TimeInterval = 8.0
 
-    private var surface: Color {
-        colorScheme == .dark ? Color.surfaceBaseDark : Color.surfaceBase
-    }
-
     var body: some View {
         ZStack {
-            surface.ignoresSafeArea()
+            // Background — soft mesh gradient
+            (colorScheme == .dark ? Color.surfaceBaseDark : Color.surfaceBase)
+                .ignoresSafeArea()
+
+            // Subtle radial glow
+            RadialGradient(
+                colors: [Color.brandPrimary.opacity(0.15), Color.clear],
+                center: .center,
+                startRadius: 0,
+                endRadius: 300
+            )
+            .ignoresSafeArea()
+            .opacity(showContent ? 1 : 0)
+            .animation(.easeIn(duration: 0.8), value: showContent)
 
             VStack(spacing: 0) {
+                // Center success card
                 Spacer()
 
-                // Success ring + checkmark
-                ZStack {
-                    // Outer expanding ring (overshoot spring)
-                    Circle()
-                        .stroke(Color.brandPrimary.opacity(0.12), lineWidth: 2)
-                        .frame(width: 120, height: 120)
-                        .scaleEffect(ringOuterScale)
+                successCard
+                    .padding(.horizontal, EventSpacing.xxl)
 
-                    // Inner progress ring
-                    Circle()
-                        .trim(from: 0, to: ringScale)
-                        .stroke(
-                            Color.brandPrimary,
-                            style: StrokeStyle(lineWidth: 4, lineCap: .round)
-                        )
-                        .frame(width: 80, height: 80)
-                        .rotationEffect(.degrees(-90))
+                Spacer()
 
-                    // Checkmark
-                    Image(systemName: "checkmark")
-                        .font(.system(size: 32, weight: .bold))
-                        .foregroundStyle(Color.brandPrimary)
-                        .scaleEffect(checkmarkProgress)
-                        .opacity(checkmarkProgress)
-                }
-                .frame(width: 120, height: 120)
-                .padding(.bottom, EventSpacing.xxl)
+                // Action buttons
+                actionButtons
+                    .padding(.horizontal, EventSpacing.xxl)
+                    .padding(.bottom, EventSpacing.massive)
+            }
+
+            // Confetti overlay
+            if confettiActive {
+                ConfettiBurst(isPlaying: true, count: 14)
+                    .allowsHitTesting(false)
+            }
+        }
+        .onAppear {
+            EventHaptics.success()
+            triggerEntryAnimations()
+            startAutoDismissTimer()
+        }
+        .onDisappear {
+            autoDismissTask?.cancel()
+        }
+        .onTapGesture {
+            resetAutoDismissTimer()
+        }
+    }
+
+    // MARK: - Success Card
+
+    private var successCard: some View {
+        EventGlass.card {
+            VStack(spacing: EventSpacing.xxl) {
+                // Animated checkmark with success ring
+                successRing
 
                 // Headline
                 Text("Added to Calendar")
@@ -65,114 +81,181 @@ struct EventConfirmationView: View {
                     .foregroundStyle(colorScheme == .dark ? Color.textPrimaryDark : Color.textPrimary)
                     .opacity(showContent ? 1 : 0)
                     .offset(y: showContent ? 0 : 12)
-                    .padding(.bottom, EventSpacing.huge)
 
                 // Mini event card
                 if let event = viewModel.parsedEvent {
-                    EventCard(event: event, variant: .compact)
-                        .padding(.horizontal, EventSpacing.xxl)
+                    compactEventCard(event: event)
                         .opacity(showContent ? 1 : 0)
                         .offset(y: showContent ? 0 : 16)
-                        .padding(.bottom, EventSpacing.massive)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: EventRadius.small)
+                                .stroke(Color.semanticSuccess.opacity(0.3), lineWidth: 1)
+                        )
                 }
-
-                Spacer()
-
-                // Action buttons
-                VStack(spacing: EventSpacing.md) {
-                    // View in Calendar
-                    Button {
-                        EventHaptics.tap()
-                        openInCalendar()
-                    } label: {
-                        HStack(spacing: EventSpacing.sm) {
-                            Image(systemName: "calendar")
-                                .font(.system(size: 16, weight: .medium))
-                            Text("View in Calendar")
-                                .font(EventTypography.bodyMedium)
-                        }
-                    }
-                    .buttonStyle(SecondaryButtonStyle())
-                    .opacity(showContent ? 1 : 0)
-                    .accessibilityLabel("View event in Calendar app")
-                    .frame(minWidth: EventSpacing.touchTarget, minHeight: EventSpacing.touchTarget)
-
-                    // Snap Another
-                    Button {
-                        EventHaptics.tap()
-                        dismissAndReset()
-                    } label: {
-                        Text("Snap Another")
-                            .font(EventTypography.bodyMedium)
-                    }
-                    .buttonStyle(GhostButtonStyle())
-                    .opacity(showContent ? 1 : 0)
-                    .accessibilityLabel("Capture another event")
-                    .frame(minWidth: EventSpacing.touchTarget, minHeight: EventSpacing.touchTarget)
-                }
-                .padding(.horizontal, EventSpacing.xxl)
-                .padding(.bottom, EventSpacing.massive)
-            }
-
-            // Confetti burst
-            if confettiActive {
-                ConfettiView()
-                    .allowsHitTesting(false)
             }
         }
-        .onAppear {
-            EventHaptics.success()
-            triggerEntryAnimation()
-            startAutoDismissTimer()
+        .padding(.horizontal, EventSpacing.md)
+    }
+
+    // MARK: - Success Ring + Checkmark
+
+    private var successRing: some View {
+        ZStack {
+            // Outer success glow (pulsing)
+            Circle()
+                .fill(Color.semanticSuccess.opacity(0.08))
+                .frame(width: 160, height: 160)
+                .scaleEffect(checkmarkAppeared ? 1.0 : 0.0)
+                .animation(
+                    .spring(response: 0.8, dampingFraction: 0.6, blendDuration: 0.3),
+                    value: checkmarkAppeared
+                )
+
+            // Expanding ring
+            Circle()
+                .stroke(Color.semanticSuccess.opacity(0.15), lineWidth: 2)
+                .frame(width: 140, height: 140)
+                .scaleEffect(ringScale)
+                .opacity(ringScale > 0 ? 1 : 0)
+
+            // Checkmark
+            if checkmarkAppeared {
+                AnimatedCheckmark(strokeColor: .semanticSuccess, lineWidth: 4)
+            }
         }
-        .onDisappear {
-            autoDismissTask?.cancel()
-            interactionTimer?.cancel()
+        .frame(width: 160, height: 160)
+        .background(
+            Circle()
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            Color.semanticSuccess.opacity(0.06),
+                            Color.semanticSuccess.opacity(0.02)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+        )
+    }
+
+    // MARK: - Compact Event Card
+
+    private func compactEventCard(event: ParsedEvent) -> some View {
+        VStack(alignment: .leading, spacing: EventSpacing.sm) {
+            // Title — bold, truncated
+            Text(event.title)
+                .font(EventTypography.subheadSemibold)
+                .foregroundStyle(colorScheme == .dark ? Color.textPrimaryDark : Color.textPrimary)
+                .lineLimit(1)
+
+            Divider()
+                .opacity(0.3)
+
+            // Date + Time row
+            eventDetail(icon: "calendar", text: formatFullDate(event.startDate))
+
+            if let location = event.location {
+                eventDetail(icon: "location", text: location)
+            }
         }
-        .onTapGesture {
-            resetAutoDismissTimer()
+        .padding(EventSpacing.lg)
+        .background(
+            RoundedRectangle(cornerRadius: EventRadius.small)
+                .fill(colorScheme == .dark ? Color.surfaceSubtleDark : Color.surfaceSubtle)
+        )
+    }
+
+    private func eventDetail(icon: String, text: String) -> some View {
+        HStack(spacing: EventSpacing.sm) {
+            Image(systemName: icon)
+                .font(EventTypography.caption)
+                .foregroundStyle(Color.textTertiary)
+                .frame(width: EventSpacing.lg)
+
+            Text(text)
+                .font(EventTypography.subheadline)
+                .foregroundStyle(colorScheme == .dark ? Color.textSecondaryDark : Color.textSecondary)
+                .lineLimit(1)
+
+            Spacer(minLength: 0)
         }
     }
 
-    // MARK: - Entry Animation
+    // MARK: - Action Buttons
 
-    private func triggerEntryAnimation() {
-        // Ring outer expands with spring overshoot
-        withAnimation(
-            .spring(response: 0.6, dampingFraction: 0.45, blendDuration: 0.3)
-        ) {
-            ringOuterScale = 1.2
+    private var actionButtons: some View {
+        VStack(spacing: EventSpacing.sm) {
+            // Done — primary
+            Button("Done") {
+                EventHaptics.tap()
+                dismissAndReset()
+            }
+            .buttonStyle(EnhancedPrimaryButtonStyle(icon: "checkmark"))
+            .frame(maxWidth: .infinity)
+            .opacity(showContent ? 1 : 0)
+            .offset(y: showContent ? 0 : 20)
+
+            HStack(spacing: EventSpacing.md) {
+                // View in Calendar
+                Button {
+                    EventHaptics.tap()
+                    openInCalendar()
+                } label: {
+                    Label("Calendar", systemImage: "calendar")
+                }
+                .buttonStyle(SecondaryButtonStyle())
+                .frame(maxWidth: .infinity)
+
+                // Snap Another
+                Button("Snap Another") {
+                    EventHaptics.tap()
+                    dismissAndReset()
+                }
+                .buttonStyle(IconButtonStyle())
+            }
+            .opacity(showContent ? 1 : 0)
+            .offset(y: showContent ? 0 : 16)
         }
+    }
 
-        // Inner ring fills
+    // MARK: - Helpers
+
+    private func formatFullDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "EEEE, MMM d · h:mm a"
+        return formatter.string(from: date)
+    }
+
+    // MARK: - Animations
+
+    private func triggerEntryAnimations() {
+        // Ring expands
         withAnimation(
-            .spring(response: 0.55, dampingFraction: 0.50, blendDuration: 0.3)
+            .spring(response: 0.6, dampingFraction: 0.5, blendDuration: 0.3)
         ) {
             ringScale = 1.0
         }
 
-        // Checkmark appears after ring
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-            withAnimation(
-                .spring(response: 0.35, dampingFraction: 0.55)
-            ) {
-                checkmarkProgress = 1.0
-            }
+        // Checkmark appears
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            checkmarkAppeared = true
+            EventHaptics.success()
         }
 
         // Content fades in
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.55) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
             withAnimation(
-                Animation.spring(response: 0.4, dampingFraction: 0.7)
+                .spring(response: 0.4, dampingFraction: 0.75)
             ) {
                 showContent = true
             }
         }
 
-        //Confetti burst - brief and subtle
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+        // Confetti burst
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
             confettiActive = true
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
                 withAnimation(EventAnimation.gentle) {
                     confettiActive = false
                 }
@@ -209,69 +292,6 @@ struct EventConfirmationView: View {
     private func dismissAndReset() {
         viewModel.reset()
         dismiss()
-    }
-}
-
-// MARK: - Confetti View
-
-private struct ConfettiView: UIViewRepresentable {
-    func makeUIView(context: Context) -> UIView {
-        let view = UIView(frame: .zero)
-        view.backgroundColor = .clear
-        view.clipsToBounds = true
-        view.isUserInteractionEnabled = false
-
-        let emitterLayer = CAEmitterLayer()
-        // NOTE: Using UIScreen.main.bounds here is a known limitation.
-        // CAEmitterLayer doesn't have direct SwiftUI geometry access, so we fall back to UIScreen.main.
-        // This should be replaced with GeometryReader in a future iOS 16+ compatible refactor.
-        emitterLayer.emitterPosition = CGPoint(x: UIScreen.main.bounds.width / 2, y: -20)
-        emitterLayer.emitterShape = .line
-        emitterLayer.emitterSize = CGSize(width: UIScreen.main.bounds.width, height: 1)
-        emitterLayer.emitterCells = (0..<6).map { _ in createEmitterCell() }
-
-        view.layer.addSublayer(emitterLayer)
-
-        return view
-    }
-
-    func updateUIView(_ uiView: UIView, context: Context) {}
-
-    private func createEmitterCell() -> CAEmitterCell {
-        let cell = CAEmitterCell()
-        cell.contents = createCircleImage(size: 8, color: confettiColor())?.cgImage
-cell.birthRate = 3
-        cell.lifetime = 2.0
-        cell.velocity = 180
-        cell.velocityRange = 60
-        cell.emissionRange = .pi / 8
-        cell.spin = 2
-        cell.spinRange = 3
-        cell.scale = 0.4
-        cell.scaleRange = 0.2
-        cell.yAcceleration = 160
-        cell.alphaSpeed = -0.16
-        return cell
-    }
-
-    private func confettiColor() -> UIColor {
-        let colors: [UIColor] = [
-            UIColor.brandPrimary,
-            UIColor.brandSecondary,
-            UIColor(hex: "#2DB55D"),  // semanticSuccess
-            UIColor.brandAccent,
-            UIColor(hex: "#FF375F"),  // vibrant pink accent
-        ]
-        return colors.randomElement() ?? UIColor.brandPrimary
-    }
-
-    private func createCircleImage(size: CGFloat, color: UIColor) -> UIImage? {
-        let renderer = UIGraphicsImageRenderer(size: CGSize(width: size, height: size))
-        return renderer.image { context in
-            color.setFill()
-            let rect = CGRect(x: 0, y: 0, width: size, height: size)
-            UIBezierPath(ovalIn: rect).fill()
-        }
     }
 }
 

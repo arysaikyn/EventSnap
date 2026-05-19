@@ -1,14 +1,10 @@
 import SwiftUI
 import SwiftData
 
-// MARK: - Content View (Premium Coordinator)
-
 struct ContentView: View {
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
     @State private var selectedTab: Tab = .capture
-    @State private var inputMode: InputMode = .camera
 
-    // MARK: - Services (injected via environment)
     @Environment(CalendarService.self) private var calendarService
     @Environment(PermissionManager.self) private var permissionManager
     @Environment(SpeechService.self) private var speechService
@@ -17,7 +13,6 @@ struct ContentView: View {
 
     @State private var ocrService = OCRService()
 
-    // MARK: - ViewModels (created here as coordinator)
     @State private var eventCreationVM: EventCreationViewModel?
     @State private var cameraVM: CameraViewModel?
     @State private var voiceVM: VoiceViewModel?
@@ -25,34 +20,14 @@ struct ContentView: View {
     @State private var historyViewModel: HistoryViewModel?
     @State private var settingsViewModel: SettingsViewModel?
 
-    // MARK: - Navigation State
     @State private var showEventPreview = false
     @State private var showEventConfirmation = false
 
-    // MARK: - Tab Enum
+    @State private var inputMode: InputMode = .camera
+
     enum Tab: String, CaseIterable, Identifiable {
-        case capture
-        case history
-        case settings
-
+        case capture, history, settings
         var id: String { rawValue }
-
-        var iconName: String {
-            switch self {
-            case .capture: return "camera.aperture"
-            case .history: return "clock.arrow.circlepath"
-            case .settings: return "gearshape"
-            }
-        }
-
-        var selectedIconName: String {
-            switch self {
-            case .capture: return "camera.aperture"
-            case .history: return "clock.arrow.circlepath.fill"
-            case .settings: return "gearshape.fill"
-            }
-        }
-
         var title: String {
             switch self {
             case .capture: return "Snap"
@@ -62,14 +37,54 @@ struct ContentView: View {
         }
     }
 
-    // MARK: - Body
-
     var body: some View {
         Group {
             if !hasCompletedOnboarding {
                 OnboardingView()
             } else {
-                mainTabView
+                ZStack(alignment: .bottom) {
+                    // MARK: - Tab Views
+                    TabView(selection: $selectedTab) {
+                        captureTab
+                            .tag(Tab.capture)
+                        historyTab
+                            .tag(Tab.history)
+                        settingsTab
+                            .tag(Tab.settings)
+                    }
+                    .tint(Color.brandPrimary)
+                    .onChange(of: eventCreationVM?.state) { _, newState in
+                        guard let newState else { return }
+                        switch newState {
+                        case .preview:
+                            showEventPreview = true
+                        case .completed:
+                            showEventPreview = false
+                            showEventConfirmation = true
+                        case .idle:
+                            showEventPreview = false
+                            showEventConfirmation = false
+                        default: break
+                        }
+                    }
+                    .sheet(isPresented: $showEventPreview) {
+                        if let vm = eventCreationVM {
+                            EventPreviewView()
+                                .environment(vm)
+                                .environment(permissionManager)
+                        }
+                    }
+                    .fullScreenCover(isPresented: $showEventConfirmation) {
+                        if let vm = eventCreationVM {
+                            EventConfirmationView()
+                                .environment(vm)
+                        }
+                    }
+
+                    // MARK: - Tab Bar Overlay
+                    CustomTabBar(selectedTab: $selectedTab)
+                }
+                .ignoresSafeArea(.keyboard)
             }
         }
         .onAppear {
@@ -77,18 +92,70 @@ struct ContentView: View {
         }
     }
 
-    // MARK: - ViewModel Setup
+    // MARK: - Tab Content
+
+    @ViewBuilder
+    private var captureTab: some View {
+        GeometryReader { proxy in
+            let topSafe = proxy.safeAreaInsets.top
+            let botSafe = proxy.safeAreaInsets.bottom
+            VStack(spacing: 0) {
+                Text("EventSnap")
+                    .font(EventTypography.sectionTitle)
+                    .foregroundStyle(colorScheme == .dark ? Color.textPrimaryDark : Color.textPrimary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, EventSpacing.pageMargin)
+                    .padding(.top, topSafe)
+
+                InputSelector(selectedMode: $inputMode)
+                    .padding(.horizontal, EventSpacing.pageMargin)
+                    .padding(.top, 8)
+
+                switch inputMode {
+                case .camera:
+                    CameraCaptureView(onImageCaptured: {
+                        handleInput(.image($0))
+                    }).environment(cameraVM)
+                     .environment(permissionManager)
+                case .voice:
+                    VoiceInputView(onTranscriptionComplete: {
+                        handleInput(.transcription($0))
+                    }).environment(voiceVM)
+                     .environment(permissionManager)
+                case .text:
+                    TextInputView(onTextSubmitted: {
+                        handleInput(.text($0))
+                    }).environment(textInputVM)
+                }
+            }
+            .background(colorScheme == .dark ? Color(.systemBackground) : Color(.systemGroupedBackground))
+            .padding(.bottom, botSafe + 70)
+        }
+    }
+
+    @ViewBuilder
+    private var historyTab: some View {
+        if let historyViewModel {
+            HistoryView(onNavigateToCapture: { selectedTab = .capture })
+                .environment(historyViewModel)
+        }
+    }
+
+    @ViewBuilder
+    private var settingsTab: some View {
+        if let settingsViewModel {
+            SettingsView()
+                .environment(settingsViewModel)
+        }
+    }
+
+    // MARK: - Logic
 
     private func setupViewModels() {
         guard eventCreationVM == nil else { return }
-
-        let creationVM = EventCreationViewModel(
-            calendarService: calendarService,
-            ocrService: ocrService,
-            speechService: speechService,
-            modelContext: modelContext
-        )
-        eventCreationVM = creationVM
+        eventCreationVM = EventCreationViewModel(
+            calendarService: calendarService, ocrService: ocrService,
+            speechService: speechService, modelContext: modelContext)
         cameraVM = CameraViewModel(ocrService: ocrService)
         voiceVM = VoiceViewModel(speechService: speechService)
         textInputVM = TextInputViewModel()
@@ -96,210 +163,109 @@ struct ContentView: View {
         settingsViewModel = SettingsViewModel(calendarService: calendarService, permissionManager: permissionManager)
     }
 
-    // MARK: - Input Handler
-
     private func handleInput(_ input: InputData) {
         guard let vm = eventCreationVM else { return }
         Task {
             switch input {
-            case .image:
-                vm.startCapture(.camera)
-            case .text:
-                vm.startCapture(.text)
-            case .transcription:
-                vm.startCapture(.voice)
+            case .image: vm.startCapture(.camera)
+            case .text: vm.startCapture(.text)
+            case .transcription: vm.startCapture(.voice)
             }
             await vm.processInput(input)
         }
     }
 
-    // MARK: - Main Tab View (Premium Custom Tab Bar)
+    // MARK: - Custom Tab Bar
+    /// Frosted glass bar with rounded top corners, positioned above
+    /// the home indicator with proper safe area padding.
+    private struct CustomTabBar: View {
+        @Binding var selectedTab: ContentView.Tab
+        @Environment(\.colorScheme) private var style
 
-    private var mainTabView: some View {
-        ZStack(alignment: .bottom) {
-            // Content layers
-            Group {
-                switch selectedTab {
-                case .capture:
-                    captureContent
-                case .history:
-                    if let historyViewModel {
-                        NavigationStack {
-                            HistoryView(onNavigateToCapture: { selectedTab = .capture })
-                                .environment(historyViewModel)
-                                .navigationTitle("History")
-                                .navigationBarTitleDisplayMode(.large)
-                        }
-                    }
-                case .settings:
-                    if let settingsViewModel {
-                        NavigationStack {
-                            SettingsView()
-                                .environment(settingsViewModel)
-                                .navigationTitle("Settings")
-                                .navigationBarTitleDisplayMode(.large)
-                        }
-                    }
-                }
-            }
-
-            // Premium floating tab bar
-            customTabBar
-        }
-        .ignoresSafeArea(.keyboard)
-        .tint(Color.brandPrimary)
-        // Observe creation state changes for navigation
-        .onChange(of: eventCreationVM?.state) { _, newState in
-            guard let newState else { return }
-            switch newState {
-            case .preview:
-                showEventPreview = true
-            case .completed:
-                showEventPreview = false
-                showEventConfirmation = true
-            case .idle:
-                showEventPreview = false
-                showEventConfirmation = false
-            default:
-                break
-            }
-        }
-        // Event Preview Sheet
-        .sheet(isPresented: $showEventPreview) {
-            if let vm = eventCreationVM {
-                EventPreviewView()
-                    .environment(vm)
-                    .environment(permissionManager)
-            }
-        }
-        // Event Confirmation Full-Screen Cover
-        .fullScreenCover(isPresented: $showEventConfirmation) {
-            if let vm = eventCreationVM {
-                EventConfirmationView()
-                    .environment(vm)
-            }
-        }
-    }
-
-    // MARK: - Custom Premium Tab Bar
-
-    private var customTabBar: some View {
-        VStack(spacing: 0) {
-            // Thin separator line
-            Rectangle()
-                .fill(colorScheme == .dark ? Color.borderSubtleDark : Color.borderSubtle)
-                .frame(height: 0.5)
-
+        var body: some View {
             HStack(spacing: 0) {
-                ForEach(Tab.allCases) { tab in
-                    Button {
-                        withAnimation(EventAnimation.tabSwitch) {
-                            selectedTab = tab
-                        }
-                        EventHaptics.tap()
-                    } label: {
-                        VStack(spacing: EventSpacing.xs) {
-                            Image(systemName: selectedTab == tab ? tab.selectedIconName : tab.iconName)
-                                .font(.system(size: 22, weight: .medium))
-                                .foregroundStyle(
-                                    selectedTab == tab
-                                    ? Color.brandPrimary
-                                    : Color.textTertiary
-                                )
-                                .frame(height: 24)
-
-                            Text(tab.title)
-                                .font(EventTypography.caption2)
-                                .foregroundStyle(
-                                    selectedTab == tab
-                                    ? Color.brandPrimary
-                                    : Color.textTertiary
-                                )
-                        }
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 48)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(tab.title)
-                    .accessibilityAddTraits(selectedTab == tab ? .isSelected : [])
-                }
+                TabButton(tab: .capture, selectedTab: $selectedTab)
+                TabButton(tab: .history, selectedTab: $selectedTab)
+                TabButton(tab: .settings, selectedTab: $selectedTab)
             }
-            .padding(.bottom, 4)
+            .padding(.vertical, EventSpacing.sm)
+            .padding(.horizontal, EventSpacing.pageMargin)
+            .frame(maxWidth: .infinity)
             .background(
-                colorScheme == .dark
-                ? Color.surfaceBaseDark
-                : Color.surfaceRaised
+                UnevenRoundedRectangle(
+                    topLeadingRadius: EventRadius.large,
+                    bottomLeadingRadius: 0,
+                    bottomTrailingRadius: 0,
+                    topTrailingRadius: EventRadius.large
+                )
+                .fill(backgroundMaterial())
             )
+            .overlay(
+                UnevenRoundedRectangle(
+                    topLeadingRadius: EventRadius.large,
+                    bottomLeadingRadius: 0,
+                    bottomTrailingRadius: 0,
+                    topTrailingRadius: EventRadius.large
+                )
+                .strokeBorder(
+                    style == .dark ? Color.white.opacity(0.1) : Color.black.opacity(0.08),
+                    lineWidth: 0.5
+                ),
+                alignment: .top
+            )
+            // Only shadow upward — tab bar floats above content
+            .shadow(
+                color: Color.black.opacity(style == .dark ? 0.4 : 0.12),
+                radius: 6, x: 0, y: -3
+            )
+            // Proper safe area: sits above home indicator
+            .safeAreaPadding(.bottom)
+        }
+
+        private func backgroundMaterial() -> some ShapeStyle {
+            style == .dark
+                ? AnyShapeStyle(Color(UIColor.systemBackground).opacity(0.92))
+                : AnyShapeStyle(Color(UIColor.systemBackground).opacity(0.82))
         }
     }
 
-    // MARK: - Capture Content
+    private struct TabButton: View {
+        var tab: ContentView.Tab
+        @Binding var selectedTab: ContentView.Tab
+        @Environment(\.colorScheme) private var style
 
-    @ViewBuilder
-    private var captureContent: some View {
-        NavigationStack {
-            VStack(spacing: 0) {
-                // Input mode selector (premium pill)
-                InputSelector(selectedMode: $inputMode)
-                    .padding(.horizontal, EventSpacing.pageMargin)
-                    .padding(.top, EventSpacing.md)
-                    .padding(.bottom, EventSpacing.lg)
+        private var isSelected: Bool {
+            selectedTab == tab
+        }
 
-                // Active input view
-                switch inputMode {
-                case .camera:
-                    cameraView
-                case .voice:
-                    voiceView
-                case .text:
-                    textInputView
+        private var iconName: String {
+            switch tab {
+            case .capture: return "camera.aperture"
+            case .history: return "clock.fill"
+            case .settings: return "gearshape"
+            }
+        }
+
+        var body: some View {
+            Button {
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                    selectedTab = tab
                 }
+                EventHaptics.selection()
+            } label: {
+                VStack(spacing: 2) {
+                    Image(systemName: iconName)
+                        .font(.system(size: 20, weight: isSelected ? .semibold : .medium))
+                    Text(tab.title)
+                        .font(.system(size: 10, weight: isSelected ? .semibold : .regular))
+                        .lineLimit(1)
+                }
+                .frame(maxWidth: .infinity)
+                .frame(height: EventSpacing.md + EventSpacing.xs)
+                .foregroundStyle(isSelected ? Color.brandPrimary : (style == .dark ? Color.textTertiaryDark : .secondary))
+                .scaleEffect(isSelected ? 1.05 : 1.0)
             }
-            .background(colorScheme == .dark ? Color.surfaceBaseDark : Color.surfaceBase)
-            .navigationTitle("EventSnap")
-            .navigationBarTitleDisplayMode(.large)
+            .buttonStyle(.plain)
         }
     }
-
-    // MARK: - Mode Views
-
-    private var cameraView: some View {
-        Group {
-            if let cameraVM {
-                CameraCaptureView(onImageCaptured: { image in
-                    handleInput(.image(image))
-                })
-                .environment(cameraVM)
-                .environment(permissionManager)
-            }
-        }
-    }
-
-    private var voiceView: some View {
-        Group {
-            if let voiceVM {
-                VoiceInputView(onTranscriptionComplete: { text in
-                    handleInput(.transcription(text))
-                })
-                .environment(voiceVM)
-                .environment(permissionManager)
-            }
-        }
-    }
-
-    private var textInputView: some View {
-        Group {
-            if let textInputVM, eventCreationVM != nil {
-                TextInputView(onTextSubmitted: { text in
-                    handleInput(.text(text))
-                })
-                .environment(textInputVM)
-            }
-        }
-    }
-}
-
-#Preview {
-    ContentView()
 }

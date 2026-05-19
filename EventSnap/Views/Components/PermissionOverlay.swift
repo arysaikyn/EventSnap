@@ -11,7 +11,7 @@ struct PermissionOverlay: View {
         VStack(spacing: EventSpacing.xxl) {
             // Icon in subtle circle
             Image(systemName: iconName)
-                .font(.system(size: 40, weight: .light))
+                .font(EventTypography.bigNumber)
                 .foregroundStyle(Color.brandPrimary)
                 .frame(width: 80, height: 80)
                 .background(
@@ -42,20 +42,21 @@ struct PermissionOverlay: View {
                 }
             } label: {
                 Text("Open Settings")
-                    .font(EventTypography.bodyMedium)
-                    .foregroundStyle(.white)
-                    .frame(width: 200, height: EventSpacing.smallButtonHeight)
-                    .background(
-                        RoundedRectangle(cornerRadius: EventRadius.medium)
-                            .fill(Color.brandPrimary)
-                    )
             }
-            .buttonStyle(.plain)
+            .buttonStyle(EnhancedPrimaryButtonStyle(icon: "gear"))
+            .frame(width: 200)
             .accessibilityLabel("Open Settings to grant permission")
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(
-            colorScheme == .dark ? Color.surfaceBaseDark : Color.surfaceBase
+            ZStack {
+                if colorScheme == .dark {
+                    Color.surfaceBaseDark.ignoresSafeArea()
+                } else {
+                    Color.surfaceBase.ignoresSafeArea()
+                }
+                EventMeshGradient.accentBackground()
+            }
         )
     }
 }

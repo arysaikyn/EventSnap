@@ -206,6 +206,63 @@ final class CalendarService {
         return try await addEvent(mutableEvent)
     }
 
+    // MARK: - Conflict Detection
+
+    /// Information about a calendar time conflict.
+    struct ConflictInfo: Identifiable {
+        let id = UUID()
+        let eventTitle: String
+        let conflictingDate: Date
+        let endDate: Date
+        let overlapMinutes: Int
+
+        /// Formatted time for display.
+        private static let timeFmt: DateFormatter = {
+            let f = DateFormatter()
+            f.dateFormat = "h:mm a"
+            return f
+        }()
+
+        /// Formatted overlap description for display.
+        var displayText: String {
+            "Conflicts with \"\(eventTitle)\" at \(Self.timeFmt.string(from: conflictingDate)) (\(overlapMinutes)min overlap)"
+        }
+    }
+
+    /// Checks for time-overlapping events in the same date range.
+    /// Non-blocking — returns conflicts for informational purposes only.
+    /// - Parameter event: The event to check conflicts for.
+    /// - Returns: Array of conflicting events, or empty array if none.
+    func findConflicts(for event: ParsedEvent) -> [ConflictInfo] {
+        let endDate = event.endDate
+            ?? Calendar.current.date(byAdding: .hour, value: 1, to: event.startDate)
+            ?? event.startDate.addingTimeInterval(3600)
+
+        let predicate = eventStore.predicateForEvents(
+            withStart: event.startDate,
+            end: endDate,
+            calendars: nil
+        )
+
+        let existingEvents = eventStore.events(matching: predicate)
+        return existingEvents
+            .filter { existing in
+                // Time overlap: existing event overlaps with new event
+                existing.startDate < endDate && existing.endDate > event.startDate
+            }
+            .map { existing in
+                let overlapStart = max(existing.startDate, event.startDate)
+                let overlapEnd = min(existing.endDate, endDate)
+                let overlapMinutes = Int(overlapEnd.timeIntervalSince(overlapStart) / 60)
+                return ConflictInfo(
+                    eventTitle: existing.title,
+                    conflictingDate: existing.startDate,
+                    endDate: existing.endDate,
+                    overlapMinutes: overlapMinutes
+                )
+            }
+    }
+
     // MARK: - Duplicate Detection
 
     /// Checks whether an event with the given title already exists within
